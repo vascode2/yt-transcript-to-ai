@@ -44,7 +44,15 @@ def iter_caption_urls(info: dict) -> list[str]:
         info.get("automatic_captions") or {},
     ]
 
-    preferred_langs = ("en", "en-US", "en-GB")
+    preferred_langs = (
+        "en",
+        "en-US",
+        "en-GB",
+        "ko",
+        "ko-KR",
+        "ja",
+        "ja-JP",
+    )
     preferred_exts = ("json3", "srv3", "srv2", "srv1", "vtt", "ttml")
 
     ordered: list[str] = []
@@ -246,7 +254,21 @@ def main() -> int:
         "skip_download": True,
         "writesubtitles": True,
         "writeautomaticsub": True,
-        "subtitleslangs": ["en.*", "en", "en-US", "en-GB"],
+        # Request broad language list so info["subtitles"] / ["automatic_captions"] include
+        # non-English tracks (e.g. Korean-only videos). iter_caption_urls still prefers en, then ko, etc.
+        "subtitleslangs": [
+            "en.*",
+            "en",
+            "en-US",
+            "en-GB",
+            "ko.*",
+            "ko",
+            "ko-KR",
+            "ja.*",
+            "ja",
+            "ja-JP",
+            "all",
+        ],
         "socket_timeout": 30,
         "nocheckcertificate": False,
     }
