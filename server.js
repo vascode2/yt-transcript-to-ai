@@ -1,4 +1,4 @@
-const http = require("http");
+﻿const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
@@ -312,6 +312,67 @@ function childEnvForTranscriptHelper() {
   return env;
 }
 
+/**
+ * Start of our helper JSON (not yt-dlp log lines that contain `{` earlier).
+ */
+function findTranscriptJsonObjectStart(raw) {
+  const byTitle = raw.indexOf('{"title"');
+  if (byTitle !== -1) {
+    return byTitle;
+  }
+  const seg = raw.indexOf('"segments"');
+  if (seg !== -1) {
+    return raw.lastIndexOf("{", seg);
+  }
+  return raw.indexOf("{");
+}
+
+/**
+ * First complete `{ ... }` from `start`, respecting strings and nested braces.
+ */
+function extractFirstJsonObjectStringFrom(raw, start) {
+  if (start < 0 || start >= raw.length || raw[start] !== "{") {
+    return null;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (c === "\\") {
+        escaped = true;
+      } else if (c === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (c === "\"") {
+      inString = true;
+      continue;
+    }
+    if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        return raw.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function extractFirstJsonObjectString(raw) {
+  const start = raw.indexOf("{");
+  return extractFirstJsonObjectStringFrom(raw, start);
+}
+
 function parseTranscriptHelperJson(stdout) {
   const raw = String(stdout).replace(/^\uFEFF/, "").trim();
   if (!raw) {
@@ -320,15 +381,16 @@ function parseTranscriptHelperJson(stdout) {
   try {
     return JSON.parse(raw);
   } catch {
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end <= start) {
+    const anchor = findTranscriptJsonObjectStart(raw);
+    const at = anchor === -1 ? raw.indexOf("{") : anchor;
+    const jsonSlice = extractFirstJsonObjectStringFrom(raw, at) ?? extractFirstJsonObjectString(raw);
+    if (!jsonSlice) {
       throw new Error(
         "Transcript helper returned invalid data. Set PYTHON to the python.exe where yt-dlp is installed (e.g. from `where python`)."
       );
     }
     try {
-      return JSON.parse(raw.slice(start, end + 1));
+      return JSON.parse(jsonSlice);
     } catch {
       throw new Error(
         "Transcript helper returned invalid data. Set PYTHON to the python.exe where yt-dlp is installed (e.g. from `where python`)."

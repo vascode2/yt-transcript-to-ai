@@ -1,3 +1,5 @@
+﻿import contextlib
+import io
 import json
 import os
 import sys
@@ -12,6 +14,13 @@ _nv = os.path.normcase(_vendor)
 sys.path[:] = [p for p in sys.path if p and os.path.normcase(os.path.normpath(p)) != _nv]
 
 from yt_dlp import YoutubeDL  # type: ignore  # noqa: E402
+
+
+class _NullLogger:
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
 
 
 def _collapse_ws(text: str) -> str:
@@ -251,6 +260,8 @@ def main() -> int:
 
     ydl_opts = {
         "quiet": True,
+        "no_warnings": True,
+        "logger": _NullLogger(),
         "skip_download": True,
         "writesubtitles": True,
         "writeautomaticsub": True,
@@ -274,34 +285,53 @@ def main() -> int:
     }
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # redirect_stdout() does NOT stop child processes (yt-dlp, Deno, etc.) from writing to fd 1,
+        # which Node's execFile captures as "stdout" after our JSON. Dup OS-level stdout to /dev/null
+        # during extraction + caption fetches, then restore before emitting the result.
+        _saved_stdout_fd = os.dup(1)
+        _dn = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(_dn, 1)
+        finally:
+            os.close(_dn)
 
-        last_fetch_error: str | None = None
-        segments: list[dict] = []
-        for caption_url in iter_caption_urls(info):
-            try:
-                payload = fetch_text(caption_url)
-                segments = parse_captions(payload, caption_url)
-            except Exception as exc:
-                last_fetch_error = str(exc)
-                segments = []
-                continue
-            if segments:
-                break
+        payload_out: bytes | None = None
+        try:
+            _devnull = io.TextIOWrapper(io.BytesIO())
+            with contextlib.redirect_stdout(_devnull):
+                with YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
 
-        if not segments:
-            detail = last_fetch_error or "Could not parse any caption track."
-            raise RuntimeError(
-                "Captions were found, but the transcript payload was empty. " + detail
-            )
+            last_fetch_error: str | None = None
+            segments: list[dict] = []
+            for caption_url in iter_caption_urls(info):
+                try:
+                    payload = fetch_text(caption_url)
+                    segments = parse_captions(payload, caption_url)
+                except Exception as exc:
+                    last_fetch_error = str(exc)
+                    segments = []
+                    continue
+                if segments:
+                    break
 
-        result = {
-            "title": info.get("title") or "YouTube Video",
-            "segments": segments,
-        }
-        payload_out = json.dumps(result, ensure_ascii=False) + "\n"
-        sys.stdout.buffer.write(payload_out.encode("utf-8"))
+            if not segments:
+                detail = last_fetch_error or "Could not parse any caption track."
+                raise RuntimeError(
+                    "Captions were found, but the transcript payload was empty. " + detail
+                )
+
+            result = {
+                "title": info.get("title") or "YouTube Video",
+                "segments": segments,
+            }
+            payload_out = (json.dumps(result, ensure_ascii=False) + "\n").encode("utf-8")
+        finally:
+            os.dup2(_saved_stdout_fd, 1)
+            os.close(_saved_stdout_fd)
+
+        if payload_out is not None:
+            os.write(1, payload_out)
         return 0
     except Exception as exc:
         print(str(exc), file=sys.stderr)
