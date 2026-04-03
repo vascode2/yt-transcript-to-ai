@@ -1,0 +1,11 @@
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+pyerr.txt
+rawout.bin
+out.json
+err.txt
