@@ -49,13 +49,25 @@
 
           <div class="result-card">
             <p class="result-label">Summary</p>
-            <ol id="summary-points" class="summary-points"></ol>
+            <ol id="summary-sections" class="summary-sections" aria-label="Structured summary"></ol>
           </div>
 
           <div class="result-card transcript-card">
             <div class="transcript-header">
               <p class="result-label">Transcript</p>
               <div class="transcript-actions">
+                <label class="transcript-search-label" for="transcript-search">
+                  <span class="visually-hidden">Find in transcript</span>
+                  <input
+                    type="search"
+                    id="transcript-search"
+                    class="transcript-search-input"
+                    placeholder="Find in transcript…"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </label>
+                <span id="transcript-search-meta" class="transcript-search-meta" aria-live="polite"></span>
                 <button type="button" id="copy-btn" class="icon-btn" title="Copy transcript">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2"/>

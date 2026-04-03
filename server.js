@@ -18,6 +18,185 @@ const MIME_TYPES = {
   ".ico": "image/x-icon",
 };
 
+/**
+ * Strip YouTube/TED-style caption credits at the start of text.
+ * Also removes a stray reviewer surname (e.g. "Korom") glued before the real line ("We can…").
+ */
+function stripTranscriptCruft(text) {
+  let t = String(text || "");
+  const nameBeforeSpeech =
+    /^(?:[A-Z][a-z]{1,20}\s+){1,3}(?=We\b|I think\b|I should\b|You can\b|They(?:'re|'ve)?\b|The general\b|The last\b|The brain\b|Regularity\b|Sleep\b|Sometimes\b|In the\b|If you\b|And the\b|So\b|But\b|When\b|What\b|Many\b|Some\b|One\b|It\b|This\b|That\b|Here\b|There\b|A\b|An\b)/u;
+
+  for (let pass = 0; pass < 10; pass++) {
+    const next = t
+      .replace(/^Transcriber:\s*[\s\S]*?\s+Reviewer:\s*[\s\S]*?\s+/i, "")
+      .replace(/^Reviewer:\s*[\s\S]*?\s+Transcriber:\s*[\s\S]*?\s+/i, "")
+      .replace(/^(Transcriber|Reviewer):\s*[^\n.]+[.!?]?\s*/gi, "")
+      .replace(/^(Transcriber|Reviewer):\s*[^\n]+\s*/gi, "")
+      .replace(nameBeforeSpeech, "")
+      .trim();
+    if (next === t) break;
+    t = next;
+  }
+  return t.trim();
+}
+
+const FILLER_PREFIX_REGEXES = [
+  /^it turns out that\s+/i,
+  /^it expects regularity and\s+/i,
+  /^what we know is that\s+/i,
+  /^the reason is that\s+/i,
+  /^the important thing is that\s+/i,
+  /^i think (that )?/i,
+  /^i should note that\s+/i,
+  /^the last thing i should note is that\s+/i,
+  /^the last thing i\s+(should note|want to say)\s+is that\s+/i,
+  /^\s*in the last \d+\s+(minutes?|seconds?)\s+before (?:bed|sleep)\b[,]?\s*/i,
+  /^and in that way[,]?\s*/i,
+  /^and certainly\b[,]?\s*/i,
+  /^and the general rule of thumb is that\s+/i,
+  /^and the general rule of thumb is\b[,]?\s*/i,
+  /^if you'?d like[,]?\s*/i,
+  /^if you('?ve|'re)\s+been\s+/i,
+  /^we can (all|think of)\s+/i,
+  /^you can also\s+/i,
+  /^the brain has learned that\s+/i,
+  /^the brain has learned\b[,]?\s*/i,
+  /^this is (really |very )?important because\s+/i,
+];
+
+function stripLeadFillers(text) {
+  let t = String(text || "").trim();
+  let prev;
+  do {
+    prev = t;
+    for (const re of FILLER_PREFIX_REGEXES) {
+      t = t.replace(re, "").trim();
+    }
+  } while (t !== prev);
+  return t;
+}
+
+function isMetadataSentence(sentence) {
+  const t = String(sentence || "").trim();
+  if (!t) return true;
+  if (/^(Transcriber|Reviewer|Subtitles?|Subtitle by|Speaker)\s*:/i.test(t)) return true;
+  if (/Translate\s+TED/i.test(t) && t.length < 140) return true;
+  const after = stripTranscriptCruft(t);
+  if (after.length < 10 && t.length < 100) return true;
+  return false;
+}
+
+function truncateAtWord(text, maxLen) {
+  const t = String(text || "").trim();
+  if (t.length <= maxLen) {
+    return t;
+  }
+  const cut = t.slice(0, maxLen);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > maxLen * 0.45 ? cut.slice(0, sp) : cut).trim();
+}
+
+function sentenceCaseStart(s) {
+  const t = s.trim();
+  if (!t) return t;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+const LEADING_CONN = /^(\s*(?:And|But|So|Yet|Plus|Also|Still|Oh|Well)\s+)+/i;
+
+/**
+ * Bold label = readable clause or lead-in (not a bag of rare keywords).
+ */
+function naturalBulletFromSentence(sentence) {
+  const raw = String(sentence || "").trim();
+  const cleaned = stripLeadFillers(stripTranscriptCruft(raw));
+  const body = cleaned || raw;
+  if (!body) {
+    return { label: "Takeaway:", body: raw };
+  }
+
+  let s = body.replace(LEADING_CONN, "").trim() || body;
+
+  const commaIdx = s.indexOf(",");
+  if (commaIdx >= 22 && commaIdx <= 100) {
+    const left = s.slice(0, commaIdx).trim();
+    const wc = left.split(/\s+/).filter(Boolean).length;
+    if (wc >= 4 && wc <= 16 && left.length <= 88) {
+      return { label: `${sentenceCaseStart(left)}:`, body: s };
+    }
+  }
+
+  const semiIdx = s.indexOf(";");
+  if (semiIdx >= 18 && semiIdx <= 92) {
+    const left = s.slice(0, semiIdx).trim();
+    const wc = left.split(/\s+/).filter(Boolean).length;
+    if (wc >= 4 && wc <= 16) {
+      return { label: `${sentenceCaseStart(left)}:`, body: s };
+    }
+  }
+
+  let words = s.split(/\s+/).filter(Boolean);
+  const maxLabelWords = 11;
+  if (words.length > maxLabelWords) {
+    words = words.slice(0, maxLabelWords);
+  }
+  const weakFirst = /^(it|there|this|that|these|those)$/i;
+  if (words.length >= 8 && weakFirst.test(words[0].replace(/['']s$/i, ""))) {
+    words = words.slice(1);
+  }
+  if (words.length < 4) {
+    words = s.split(/\s+/).filter(Boolean).slice(0, 9);
+  }
+
+  let labelText = words.join(" ");
+  labelText = truncateAtWord(labelText, 64).replace(/\s+[,;:，、]+$/u, "").trim();
+  return {
+    label: `${sentenceCaseStart(labelText)}:`,
+    body: s,
+  };
+}
+
+function sectionTitleFromSentences(sentences, scoredRows) {
+  const list = Array.isArray(sentences) ? sentences : [];
+  if (!list.length) {
+    return "Main ideas";
+  }
+
+  const usable = list.filter((s) => !isMetadataSentence(s));
+  const pool = usable.length ? usable : list;
+
+  let primary = pool[0];
+  if (Array.isArray(scoredRows) && scoredRows.length) {
+    const byScore = [...scoredRows].sort((a, b) => b.score - a.score);
+    const best = byScore.find((row) => row.sentence && !isMetadataSentence(row.sentence));
+    if (best && best.sentence) {
+      primary = best.sentence;
+    }
+  }
+
+  const a = stripLeadFillers(stripTranscriptCruft(primary)).trim();
+  let title = truncateAtWord(a, 72).replace(/[`'"“”]+$/, "").replace(/[,;:，、]\s*$/u, "").trim();
+
+  if (title.length < 18 && pool[1]) {
+    const b = stripLeadFillers(stripTranscriptCruft(pool[1])).trim();
+    const part2 = truncateAtWord(b, 52);
+    if (part2) {
+      title = `${truncateAtWord(a, 38)} — ${part2}`;
+    }
+  }
+
+  title = String(title || "").trim().replace(/\s+/g, " ");
+  if (!title) {
+    return "Main ideas";
+  }
+  if (title.length > 78) {
+    title = `${title.slice(0, 75)}…`;
+  }
+  const c = title.charAt(0);
+  return (c ? c.toUpperCase() + title.slice(1) : title).replace(/[,;:，、]+$/u, "").trim() || "Main ideas";
+}
+
 const STOP_WORDS = new Set([
   "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
   "any", "are", "as", "at", "be", "because", "been", "before", "being", "below",
@@ -443,62 +622,193 @@ function formatTimestamp(seconds) {
 
 function splitSentences(text) {
   return text
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?。！？])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 35);
+    .filter((sentence) => sentence.length > 12);
+}
+
+function tokenizeForScore(sentence) {
+  const lower = sentence.toLowerCase();
+  const latin = lower.match(/[a-z0-9']+/g) || [];
+  if (latin.length) {
+    return latin;
+  }
+  return lower.match(/[\p{L}\p{N}]+/gu) || [];
 }
 
 function scoreSentences(sentences) {
   const frequencies = new Map();
 
   for (const sentence of sentences) {
-    for (const token of sentence.toLowerCase().match(/[a-z0-9']+/g) || []) {
-      if (STOP_WORDS.has(token) || token.length < 3) continue;
+    for (const token of tokenizeForScore(sentence)) {
+      if (STOP_WORDS.has(token) || token.length < 2) continue;
       frequencies.set(token, (frequencies.get(token) || 0) + 1);
     }
   }
 
   return sentences.map((sentence, index) => {
-    const words = sentence.toLowerCase().match(/[a-z0-9']+/g) || [];
-    const score = words.reduce((total, word) => total + (frequencies.get(word) || 0), 0);
+    const words = tokenizeForScore(sentence);
+    const score = words.reduce((total, word) => total + (frequencies.get(word.toLowerCase()) || 0), 0);
 
     return { index, sentence, score };
   });
 }
 
-function buildParagraphSummary(transcriptText) {
-  const sentences = splitSentences(transcriptText);
-
-  if (!sentences.length) {
-    return transcriptText.slice(0, 600);
-  }
-
-  const ranked = scoreSentences(sentences)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(5, sentences.length))
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.sentence);
-
-  return ranked.join(" ");
-}
-
-function buildSummaryPoints(segments) {
-  if (!segments.length) return [];
-
-  const points = [];
-  const chunkSize = Math.max(1, Math.floor(segments.length / 5));
-
-  for (let i = 0; i < segments.length && points.length < 5; i += chunkSize) {
-    const chunk = segments.slice(i, i + chunkSize);
-    const combined = chunk.map((item) => item.text).join(" ");
-    const summary = buildParagraphSummary(combined);
-
-    if (summary) {
-      points.push({ text: summary });
+function chunkLongText(text, maxLen) {
+  const out = [];
+  let i = 0;
+  while (i < text.length) {
+    let end = Math.min(i + maxLen, text.length);
+    if (end < text.length) {
+      const space = text.lastIndexOf(" ", end);
+      if (space > i + 30) {
+        end = space;
+      }
+    }
+    const piece = text.slice(i, end).trim();
+    if (piece.length > 8) {
+      out.push(piece);
+    } else if (piece.length > 0 && end >= text.length) {
+      out.push(piece);
+    }
+    if (end <= i) {
+      i += 1;
+    } else {
+      i = end;
     }
   }
+  return out.length ? out : text.trim() ? [text.trim().slice(0, maxLen)] : [];
+}
 
-  return points;
+function sentencesFromChunkText(combined) {
+  const trimmed = combined.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let sentences = splitSentences(trimmed);
+  if (!sentences.length && trimmed.length > 25) {
+    sentences = chunkLongText(trimmed, 200);
+  }
+  if (!sentences.length) {
+    sentences = [trimmed.length > 900 ? `${trimmed.slice(0, 897)}…` : trimmed];
+  }
+  return sentences;
+}
+
+function formatTimestampBracket(startSec, endSec) {
+  const a = formatTimestamp(startSec);
+  if (endSec > startSec + 1.5) {
+    return `[${a}, ${formatTimestamp(endSec)}]`;
+  }
+  return `[${a}]`;
+}
+
+function buildSummarySections(segments, videoId) {
+  const list = Array.isArray(segments) ? segments : [];
+  if (!list.length) {
+    return [];
+  }
+
+  const targetSections = Math.min(5, Math.max(3, Math.ceil(list.length / 70)));
+  const chunkSize = Math.max(1, Math.ceil(list.length / targetSections));
+  const sections = [];
+
+  for (let i = 0; i < list.length && sections.length < targetSections; i += chunkSize) {
+    const chunk = list.slice(i, i + chunkSize);
+    const combined = chunk
+      .map((item) => (item != null && item.text != null ? String(item.text) : "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const sentences = sentencesFromChunkText(stripTranscriptCruft(combined.trim()));
+    if (!sentences.length) {
+      continue;
+    }
+
+    const scored = scoreSentences(sentences);
+    const hasSignal = scored.some((row) => row.score > 0);
+    const maxBullets = 4;
+    let picked;
+    if (hasSignal) {
+      picked = scored
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.min(maxBullets, scored.length))
+        .sort((a, b) => a.index - b.index);
+    } else {
+      picked = scored.slice(0, Math.min(maxBullets, scored.length));
+    }
+
+    const t0 = chunk[0].start;
+    const last = chunk[chunk.length - 1];
+    const t1 = last.start + (last.duration || 0);
+    const span = Math.max(1, t1 - t0);
+
+    const bullets = picked.map((row, bi) => {
+      const { label, body } = naturalBulletFromSentence(row.sentence);
+      const startSec = t0 + (bi / Math.max(1, picked.length)) * span;
+      const endSec = t0 + ((bi + 1) / Math.max(1, picked.length)) * span;
+      return {
+        label,
+        body,
+        startSec: Math.floor(startSec),
+        endSec: Math.floor(endSec),
+        bracket: formatTimestampBracket(startSec, endSec),
+        href: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${Math.floor(startSec)}s`,
+      };
+    });
+
+    sections.push({
+      title: sectionTitleFromSentences(sentences, scored),
+      sectionStartSec: Math.floor(t0),
+      sectionEndSec: Math.floor(t1),
+      bullets,
+    });
+  }
+
+  if (!sections.length && list.length > 0) {
+    const whole = list
+      .map((item) => (item != null && item.text != null ? String(item.text) : "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const sentences = sentencesFromChunkText(stripTranscriptCruft(whole.trim()));
+    if (!sentences.length) {
+      return [];
+    }
+    const scored = scoreSentences(sentences);
+    const hasSignal = scored.some((row) => row.score > 0);
+    const maxBullets = 6;
+    const picked = hasSignal
+      ? scored
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.min(maxBullets, scored.length))
+          .sort((a, b) => a.index - b.index)
+      : scored.slice(0, Math.min(maxBullets, scored.length));
+    const t0 = list[0].start;
+    const last = list[list.length - 1];
+    const t1 = last.start + (last.duration || 0);
+    const span = Math.max(1, t1 - t0);
+    const bullets = picked.map((row, bi) => {
+      const { label, body } = naturalBulletFromSentence(String(row.sentence));
+      const startSec = t0 + (bi / Math.max(1, picked.length)) * span;
+      const endSec = t0 + ((bi + 1) / Math.max(1, picked.length)) * span;
+      return {
+        label,
+        body,
+        startSec: Math.floor(startSec),
+        endSec: Math.floor(endSec),
+        bracket: formatTimestampBracket(startSec, endSec),
+        href: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${Math.floor(startSec)}s`,
+      };
+    });
+    sections.push({
+      title: sectionTitleFromSentences(sentences, scored),
+      sectionStartSec: Math.floor(t0),
+      sectionEndSec: Math.floor(t1),
+      bullets,
+    });
+  }
+
+  return sections;
 }
 
 function normalizeSegmentText(item) {
@@ -506,7 +816,7 @@ function normalizeSegmentText(item) {
   return raw.replace(/\s+/g, " ").trim();
 }
 
-function buildSummaryPayload(videoId, title, segments) {
+async function buildSummaryPayload(videoId, title, segments) {
   const normalizedSegments = segments
     .map((item) => ({ ...item, text: normalizeSegmentText(item) }))
     .filter((item) => item.text.length > 0);
@@ -519,10 +829,28 @@ function buildSummaryPayload(videoId, title, segments) {
     );
   }
 
+  let summarySections = buildSummarySections(normalizedSegments, videoId);
+  let summarySource = "extractive";
+
+  const apiKey = process.env.OPENAI_API_KEY && String(process.env.OPENAI_API_KEY).trim();
+  if (apiKey) {
+    try {
+      const { summarizeTranscriptOpenAI } = require(path.join(__dirname, "lib", "openai-summarize.js"));
+      const llm = await summarizeTranscriptOpenAI(videoId, title, transcriptText, normalizedSegments);
+      if (Array.isArray(llm) && llm.length) {
+        summarySections = llm;
+        summarySource = "openai";
+      }
+    } catch (err) {
+      console.warn("[youtube-summary] OpenAI summarization failed; using extractive summary.", err.message || err);
+    }
+  }
+
   return {
     videoId,
     title,
-    summaryPoints: buildSummaryPoints(normalizedSegments),
+    summarySections,
+    summarySource,
     fullTranscript: transcriptText,
     transcriptLength: transcriptText.length,
   };
@@ -563,7 +891,7 @@ async function summarizeYoutubeUrl(youtubeUrl) {
   const transcriptSegments = helperOutput.segments || [];
   const title = helperOutput.title || "YouTube Video";
 
-  return buildSummaryPayload(videoId, title, transcriptSegments);
+  return await buildSummaryPayload(videoId, title, transcriptSegments);
 }
 
 function handleApi(req, res) {
