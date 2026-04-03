@@ -1,4 +1,4 @@
-﻿const http = require("http");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
@@ -482,7 +482,7 @@ function buildParagraphSummary(transcriptText) {
   return ranked.join(" ");
 }
 
-function buildKeyPoints(segments) {
+function buildSummaryPoints(segments) {
   if (!segments.length) return [];
 
   const points = [];
@@ -494,10 +494,7 @@ function buildKeyPoints(segments) {
     const summary = buildParagraphSummary(combined);
 
     if (summary) {
-      points.push({
-        timestamp: formatTimestamp(chunk[0].start),
-        text: summary,
-      });
+      points.push({ text: summary });
     }
   }
 
@@ -525,9 +522,8 @@ function buildSummaryPayload(videoId, title, segments) {
   return {
     videoId,
     title,
-    summary: buildParagraphSummary(transcriptText),
-    keyPoints: buildKeyPoints(normalizedSegments),
-    transcriptPreview: transcriptText.slice(0, 3000),
+    summaryPoints: buildSummaryPoints(normalizedSegments),
+    fullTranscript: transcriptText,
     transcriptLength: transcriptText.length,
   };
 }

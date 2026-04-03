@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube Summary</title>
+    <meta name="description" content="Paste a YouTube link and instantly get a clean, readable summary with key points — no sign-up required." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -48,17 +49,30 @@
 
           <div class="result-card">
             <p class="result-label">Summary</p>
-            <p id="summary-text" class="body-copy"></p>
+            <ol id="summary-points" class="summary-points"></ol>
           </div>
 
-          <div class="result-card">
-            <p class="result-label">Key Points</p>
-            <div id="key-points" class="key-points"></div>
-          </div>
-
-          <div class="result-card">
-            <p class="result-label">Transcript Preview</p>
-            <p id="transcript-preview" class="body-copy transcript-preview"></p>
+          <div class="result-card transcript-card">
+            <div class="transcript-header">
+              <p class="result-label">Transcript</p>
+              <div class="transcript-actions">
+                <button type="button" id="copy-btn" class="icon-btn" title="Copy transcript">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  <span id="copy-label">Copy</span>
+                </button>
+                <button type="button" id="expand-btn" class="icon-btn expand-btn" title="Expand transcript" aria-expanded="false">
+                  <svg id="expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div id="transcript-body" class="transcript-body collapsed">
+              <p id="transcript-text" class="body-copy transcript-text"></p>
+            </div>
           </div>
         </section>
       </section>
