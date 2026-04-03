@@ -2,7 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
-const { execFile } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -34,8 +34,9 @@ const STOP_WORDS = new Set([
 ]);
 
 function sendJson(res, statusCode, data) {
+  const body = JSON.stringify(data);
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
+  res.end(body);
 }
 
 function sendFile(res, filePath) {
@@ -80,6 +81,213 @@ function parseRequestBody(req) {
 
     req.on("error", reject);
   });
+}
+
+let cachedPythonInvocation = null;
+
+const PYTHON_HINT =
+  " Copy the full path from: python -c \"import sys; print(sys.executable)\" (paste exactly ΓÇö do not use ... as shorthand). Then: set PYTHON=C:\\full\\path\\python.exe";
+
+function tryPyLauncherSysExecutable(pyLauncher) {
+  try {
+    const out = execFileSync(pyLauncher, ["-3", "-c", "import sys; print(sys.executable)"], {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: process.env,
+    }).trim();
+    if (out && fs.existsSync(out)) {
+      return out;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Typical Microsoft Store / python.org install under the user profile.
+ */
+function findWindowsUserInstallPythonExe() {
+  const local = process.env.LOCALAPPDATA;
+  if (!local) {
+    return null;
+  }
+  const root = path.join(local, "Programs", "Python");
+  if (!fs.existsSync(root)) {
+    return null;
+  }
+  try {
+    const candidates = [];
+    for (const name of fs.readdirSync(root)) {
+      const exe = path.join(root, name, "python.exe");
+      if (fs.existsSync(exe)) {
+        candidates.push(exe);
+      }
+    }
+    if (!candidates.length) {
+      return null;
+    }
+    candidates.sort((a, b) => b.localeCompare(a, undefined, { sensitivity: "base", numeric: true }));
+    return candidates[0];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Windows: `python` on PATH is often a Store shim that answers --version but cannot be spawned (ENOENT).
+ * Prefer a real python.exe from the py launcher, per-user installs, or where.exe.
+ */
+function resolveWindowsPythonExecutablePath() {
+  const pyLaunchers = [
+    "py",
+    path.join(process.env.WINDIR || "C:\\Windows", "py.exe"),
+  ];
+  for (const launcher of pyLaunchers) {
+    if (launcher !== "py" && !fs.existsSync(launcher)) {
+      continue;
+    }
+    const resolved = tryPyLauncherSysExecutable(launcher);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  const userExe = findWindowsUserInstallPythonExe();
+  if (userExe) {
+    return userExe;
+  }
+
+  const pf = process.env.ProgramFiles || "C:\\Program Files";
+  for (const ver of ["Python313", "Python312", "Python311", "Python310"]) {
+    const exe = path.join(pf, ver, "python.exe");
+    if (fs.existsSync(exe)) {
+      return exe;
+    }
+  }
+
+  try {
+    const out = execFileSync("where.exe", ["python"], {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: process.env,
+    }).trim();
+    const lines = out
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const isStoreShim = (p) => /WindowsApps/i.test(p) && /python/i.test(p);
+    for (const line of lines) {
+      if (isStoreShim(line)) {
+        continue;
+      }
+      if (fs.existsSync(line)) {
+        return line;
+      }
+    }
+    for (const line of lines) {
+      if (fs.existsSync(line)) {
+        return line;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+/**
+ * Node may run with a different PATH than your terminal (e.g. Windows GUI / Store Python).
+ * On Windows, caches a concrete python.exe path when possible.
+ */
+function resolvePythonForTranscript() {
+  if (cachedPythonInvocation) {
+    return cachedPythonInvocation;
+  }
+
+  const tryVersion = (executable, prefixArgs = []) => {
+    const base = { stdio: "ignore", timeout: 10_000, env: process.env };
+    try {
+      execFileSync(executable, [...prefixArgs, "--version"], base);
+      return "direct";
+    } catch {
+      if (process.platform !== "win32") {
+        return false;
+      }
+    }
+    try {
+      execFileSync(executable, [...prefixArgs, "--version"], { ...base, shell: true });
+      return "shell";
+    } catch {
+      return false;
+    }
+  };
+
+  if (process.env.PYTHON && String(process.env.PYTHON).trim()) {
+    const exe = String(process.env.PYTHON).trim().replace(/^["']+|["']+$/g, "");
+    if (/\.\.\.|ΓÇª/.test(exe)) {
+      console.warn(
+        'PYTHON looks like a placeholder (contains "..."). Use the real path from: python -c "import sys; print(sys.executable)"'
+      );
+    } else {
+      const mode = tryVersion(exe, []);
+      if (mode === "direct") {
+        cachedPythonInvocation = { executable: exe, argvPrefix: [], hint: PYTHON_HINT };
+        return cachedPythonInvocation;
+      }
+      if (mode === "shell") {
+        console.warn(
+          'PYTHON path only responds when run through cmd; using "python" from PATH for the transcript helper.'
+        );
+        cachedPythonInvocation = { executable: "python", argvPrefix: [], hint: PYTHON_HINT };
+        return cachedPythonInvocation;
+      }
+      if (!fs.existsSync(exe)) {
+        console.warn(
+          `PYTHON did not run and path is not visible to Node (often Microsoft Store Python): ${exe}`
+        );
+      } else {
+        console.warn(`PYTHON is set to "${exe}" but --version failed; probing other candidates...`);
+      }
+    }
+  }
+
+  if (process.platform === "win32") {
+    const resolved = resolveWindowsPythonExecutablePath();
+    if (resolved && tryVersion(resolved, [])) {
+      cachedPythonInvocation = { executable: resolved, argvPrefix: [], hint: PYTHON_HINT };
+      return cachedPythonInvocation;
+    }
+    if (tryVersion("py", ["-3"])) {
+      cachedPythonInvocation = { executable: "py", argvPrefix: ["-3"], hint: PYTHON_HINT };
+      return cachedPythonInvocation;
+    }
+    if (tryVersion("python", [])) {
+      console.warn(
+        'Using command name "python" on Windows; if the UI shows spawn ENOENT, set PYTHON to the full path from: py -3 -c "import sys; print(sys.executable)"'
+      );
+      cachedPythonInvocation = { executable: "python", argvPrefix: [], hint: PYTHON_HINT };
+      return cachedPythonInvocation;
+    }
+  } else {
+    if (tryVersion("python3", [])) {
+      cachedPythonInvocation = { executable: "python3", argvPrefix: [], hint: PYTHON_HINT };
+      return cachedPythonInvocation;
+    }
+    if (tryVersion("python", [])) {
+      cachedPythonInvocation = { executable: "python", argvPrefix: [], hint: PYTHON_HINT };
+      return cachedPythonInvocation;
+    }
+  }
+
+  cachedPythonInvocation = {
+    executable: process.platform === "win32" ? "python" : "python3",
+    argvPrefix: [],
+    unresolved: true,
+    hint: PYTHON_HINT,
+  };
+  return cachedPythonInvocation;
 }
 
 function childEnvForTranscriptHelper() {
@@ -265,12 +473,13 @@ function buildSummaryPayload(videoId, title, segments) {
 async function summarizeYoutubeUrl(youtubeUrl) {
   const videoId = extractVideoId(youtubeUrl);
   const helperPath = path.join(__dirname, "scripts", "fetch_transcript.py");
-  const pythonPath = process.env.PYTHON || "python";
+  const py = resolvePythonForTranscript();
+  const argv = [...py.argvPrefix, "-u", helperPath, youtubeUrl];
 
   const helperOutput = await new Promise((resolve, reject) => {
     execFile(
-      pythonPath,
-      [helperPath, youtubeUrl],
+      py.executable,
+      argv,
       {
         cwd: __dirname,
         maxBuffer: 10_000_000,
@@ -279,7 +488,8 @@ async function summarizeYoutubeUrl(youtubeUrl) {
       },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new Error(stderr.trim() || error.message || "Failed to fetch transcript."));
+          const extra = error.code === "ENOENT" ? py.hint || "" : "";
+          reject(new Error((stderr.trim() || error.message || "Failed to fetch transcript.") + extra));
           return;
         }
 
@@ -342,4 +552,26 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`YouTube Summary app running at http://localhost:${PORT}`);
+  const py = resolvePythonForTranscript();
+  if (py.unresolved) {
+    console.warn(
+      "Warning: could not find Python on PATH (tried python, then py -3 on Windows). " +
+        "Set PYTHON or fix PATH; transcript requests will fail until then."
+    );
+  } else {
+    const label = [py.executable, ...py.argvPrefix].join(" ");
+    console.log(`Transcript helper: ${label}${py.executable.includes(path.sep) ? " (absolute path)" : ""}`);
+  }
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other Node process or use another port, e.g.\n` +
+        `  PowerShell:  $env:PORT=3001; node server.js\n` +
+        `  cmd.exe:     set PORT=3001&& node server.js`
+    );
+    process.exit(1);
+  }
+  throw err;
 });
