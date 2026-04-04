@@ -48,8 +48,16 @@
   }
 
   function tryEmit() {
+    const urlVid = new URLSearchParams(window.location.search).get("v") || "";
     const detail = pickDetail(getPlayerResponse());
     if (!detail) return;
+    if (
+      urlVid &&
+      detail.videoId !== urlVid &&
+      detail.videoId.toLowerCase() !== urlVid.toLowerCase()
+    ) {
+      return;
+    }
     const sig = `${detail.videoId}|${detail.tracks.map((t) => t.baseUrl).join(";")}`;
     if (sig === lastSig) return;
     lastSig = sig;

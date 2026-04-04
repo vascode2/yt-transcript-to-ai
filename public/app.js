@@ -154,6 +154,19 @@ function setExpanded(expanded) {
   }
 }
 
+function copyTextViaTextarea(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return ok;
+}
+
 async function copyTranscript() {
   if (!fullTranscript) return;
   try {
@@ -165,8 +178,19 @@ async function copyTranscript() {
       copyBtn.classList.remove("copied");
     }, 2000);
   } catch {
-    copyLabel.textContent = "Failed";
-    setTimeout(() => { copyLabel.textContent = "Copy"; }, 2000);
+    if (copyTextViaTextarea(fullTranscript)) {
+      copyLabel.textContent = "Copied!";
+      copyBtn.classList.add("copied");
+      setTimeout(() => {
+        copyLabel.textContent = "Copy";
+        copyBtn.classList.remove("copied");
+      }, 2000);
+    } else {
+      copyLabel.textContent = "Failed";
+      setTimeout(() => {
+        copyLabel.textContent = "Copy";
+      }, 2000);
+    }
   }
 }
 
@@ -223,7 +247,11 @@ async function submitSummary(event) {
     const mode =
       payload.summarySource === "openai"
         ? "AI outline"
-        : "Quick extract";
+        : payload.summarySource === "gemini"
+          ? "Gemini outline"
+          : payload.summarySource === "ollama"
+            ? "Local (Ollama)"
+            : "Quick extract";
     setStatus(`Summary ready (${mode}) · ${payload.transcriptLength.toLocaleString()} characters`);
   } catch (error) {
     setStatus(error.message || "Something went wrong.");

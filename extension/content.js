@@ -5,7 +5,7 @@ let hookInjected = false;
 /** @type {{ vid: string, result: object, formatted: string } | null} */
 let transcriptCache = null;
 
-const LANG_PREFS = ["en", "en-US", "en-GB", "en-CA", "en-AU", "en-IN"];
+const LANG_PREFS = ["ko", "ko-KR", "ko-kr", "en", "en-US", "en-GB", "en-CA", "en-AU", "en-IN", "ja", "ja-JP", "zh", "zh-CN", "zh-TW"];
 const SUMMARY_INSTRUCTION =
   "Please summarize this YouTube transcript. Use clear headings, bullet points for main ideas, and keep names, numbers, and quotes accurate.\n\n---\n\n";
 
@@ -26,8 +26,21 @@ function videoIdFromUrl() {
   }
 }
 
+/** URL ?v= is source of truth; stale captionMeta from SPA must not override. */
+function reconcileVideoIdentity() {
+  const urlVid = videoIdFromUrl();
+  if (!urlVid) return;
+  if (captionMeta?.videoId && captionMeta.videoId !== urlVid) {
+    captionMeta = null;
+  }
+  if (transcriptCache && transcriptCache.vid !== urlVid) {
+    transcriptCache = null;
+  }
+}
+
 function videoTitleGuess() {
-  const fromMeta = captionMeta?.title?.trim();
+  const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+  const fromMeta = captionMeta?.videoId === vid && captionMeta?.title?.trim() ? captionMeta.title.trim() : "";
   if (fromMeta) return fromMeta;
   const h1 = document.querySelector("ytd-watch-metadata h1.ytd-watch-metadata-video-title, ytd-watch-metadata #title h1, h1");
   return (h1 && h1.textContent && h1.textContent.trim()) || "";
@@ -72,42 +85,74 @@ function copyViaTextarea(text) {
 }
 
 async function copyToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return copyViaTextarea(text);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      if (copyViaTextarea(text)) return true;
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
+  return false;
 }
 
-async function fetchTranscriptFromPage() {
-  const bridge = await chrome.runtime.sendMessage({
-    type: "YTS_FETCH_TRANSCRIPT",
-    langPrefs: LANG_PREFS,
-  });
+async function fetchTranscriptFromPage(expectedVideoId) {
+  let bridge;
+  try {
+    bridge = await chrome.runtime.sendMessage({
+      type: "YTS_FETCH_TRANSCRIPT",
+      langPrefs: LANG_PREFS,
+      expectedVideoId: expectedVideoId || "",
+    });
+  } catch (err) {
+    const m = String(err?.message || err || "");
+    if (/invalidated|receiving end does not exist/i.test(m)) {
+      throw new Error("Extension was reloaded — please refresh this page (F5).");
+    }
+    throw new Error(m || "Could not reach the extension.");
+  }
   if (!bridge?.ok) {
     throw new Error(bridge?.error || "Could not get transcript.");
   }
   return bridge;
 }
 
+const TRANSCRIPT_MAX_RETRIES = 3;
+const TRANSCRIPT_RETRY_DELAY_MS = 4000;
+
 async function getTranscriptBundle() {
-  const vid = captionMeta?.videoId || videoIdFromUrl();
+  reconcileVideoIdentity();
+  const vid = videoIdFromUrl() || captionMeta?.videoId || "";
   if (!vid) {
     throw new Error("Open a video with ?v= in the URL.");
   }
   if (transcriptCache && transcriptCache.vid === vid) {
     return transcriptCache;
   }
-  const result = await fetchTranscriptFromPage();
-  const transcript = result.text;
-  if (!transcript) {
-    throw new Error("Empty transcript.");
+
+  let lastErr = null;
+  for (let attempt = 0; attempt < TRANSCRIPT_MAX_RETRIES; attempt++) {
+    try {
+      const result = await fetchTranscriptFromPage(vid);
+      const transcript = result.text;
+      if (!transcript) {
+        throw new Error("Empty transcript.");
+      }
+      const title = videoTitleGuess();
+      const headerVid = result.videoId || vid;
+      const formatted = formatCopyBlock(title, headerVid, transcript);
+      transcriptCache = { vid, result, formatted };
+      return transcriptCache;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < TRANSCRIPT_MAX_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, TRANSCRIPT_RETRY_DELAY_MS));
+        reconcileVideoIdentity();
+      }
+    }
   }
-  const title = videoTitleGuess();
-  const formatted = formatCopyBlock(title, vid, transcript);
-  transcriptCache = { vid, result, formatted };
-  return transcriptCache;
+  throw lastErr;
 }
 
 function mountUI() {
@@ -176,20 +221,52 @@ function mountUI() {
 
   async function onCopyClick() {
     status.textContent = "";
-    status.classList.remove("yts-ext-err");
+    status.classList.remove("yts-ext-err", "yts-ext-status--long");
     setBusy([copyBtn], true);
-    status.textContent = "Fetching…";
+    status.textContent = "Fetching transcript…";
+
+    const withRetryStatus = async () => {
+      reconcileVideoIdentity();
+      const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+      if (!vid) throw new Error("Open a video with ?v= in the URL.");
+      if (transcriptCache && transcriptCache.vid === vid) return transcriptCache;
+
+      let lastErr = null;
+      for (let attempt = 0; attempt < TRANSCRIPT_MAX_RETRIES; attempt++) {
+        try {
+          const result = await fetchTranscriptFromPage(vid);
+          if (!result.text) throw new Error("Empty transcript.");
+          const title = videoTitleGuess();
+          const formatted = formatCopyBlock(title, result.videoId || vid, result.text);
+          transcriptCache = { vid, result, formatted };
+          return transcriptCache;
+        } catch (e) {
+          lastErr = e;
+          if (/reloaded|refresh this page/i.test(e.message)) throw e;
+          if (attempt < TRANSCRIPT_MAX_RETRIES - 1) {
+            status.textContent = `Retrying (${attempt + 2}/${TRANSCRIPT_MAX_RETRIES})… waiting for video data`;
+            await new Promise((r) => setTimeout(r, TRANSCRIPT_RETRY_DELAY_MS));
+            reconcileVideoIdentity();
+          }
+        }
+      }
+      throw lastErr;
+    };
+
     try {
-      const { vid, result, formatted } = await getTranscriptBundle();
+      const { vid, result, formatted } = await withRetryStatus();
       const ok = await copyToClipboard(formatted);
-      if (!ok) throw new Error("Clipboard blocked.");
-      const lang = result.languageCode || "";
-      const auto = result.kind === "asr" ? " · auto" : "";
-      const src = result.source?.startsWith("dom") ? " · panel" : "";
-      status.textContent = `Copied (${lang}${auto}${src}).`;
+      if (!ok) throw new Error("Clipboard blocked — click the page first, then try again.");
+      const langCode = result.languageCode || "";
+      const langNames = { en: "English", ko: "Korean", ja: "Japanese", zh: "Chinese", es: "Spanish", fr: "French", de: "German", pt: "Portuguese" };
+      const langLabel = langNames[langCode] || langNames[langCode.split("-")[0]] || langCode;
+      const autoLabel = result.kind === "asr" ? ", auto-generated" : "";
+      status.textContent = `Copied${langLabel ? ` (${langLabel}${autoLabel})` : ""}.`;
     } catch (e) {
       status.classList.add("yts-ext-err");
-      status.textContent = e.message || "Copy failed.";
+      const msg = e.message || "Copy failed.";
+      status.classList.toggle("yts-ext-status--long", msg.length > 90);
+      status.textContent = msg;
     } finally {
       setBusy([copyBtn], false);
     }
@@ -199,43 +276,80 @@ function mountUI() {
     const openInBackground = !!opts.openInBackground;
     const triggerBtn = opts.triggerBtn;
     status.textContent = "";
-    status.classList.remove("yts-ext-err");
+    status.classList.remove("yts-ext-err", "yts-ext-status--long");
     setBusy([triggerBtn], true);
     status.textContent = "Fetching…";
     try {
-      const { result, formatted } = await getTranscriptBundle();
-      const prompt = SUMMARY_INSTRUCTION + formatted;
+      let prompt;
+      let transcriptOk = true;
+      let result = null;
+      try {
+        const bundle = await getTranscriptBundle();
+        result = bundle.result;
+        prompt = SUMMARY_INSTRUCTION + bundle.formatted;
+      } catch (transcriptErr) {
+        transcriptOk = false;
+        reconcileVideoIdentity();
+        const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+        if (!vid) {
+          throw transcriptErr;
+        }
+        const title = videoTitleGuess();
+        const placeholder =
+          "Transcript could not be read from this page (timedtext blocked, empty panel, etc.). " +
+          "Copy lines from YouTube’s transcript here, or use the project’s yt-dlp script, then ask for a summary.\n\n" +
+          "[Paste transcript below]\n\n";
+        prompt = SUMMARY_INSTRUCTION + formatCopyBlock(title, vid, placeholder);
+      }
+
       const clipOk = await copyToClipboard(prompt);
       if (!clipOk) throw new Error("Clipboard blocked.");
 
       const storageKey = `yts_ext_ai_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       await chrome.storage.local.set({ [storageKey]: prompt });
-      const res = await chrome.runtime.sendMessage({
-        type: "YTS_OPEN_AI_WITH_PROMPT",
-        service: kind,
-        storageKey,
-        openInBackground,
-      });
+      let res;
+      try {
+        res = await chrome.runtime.sendMessage({
+          type: "YTS_OPEN_AI_WITH_PROMPT",
+          service: kind,
+          storageKey,
+          openInBackground,
+        });
+      } catch (msgErr) {
+        const m = String(msgErr?.message || msgErr || "");
+        throw new Error(
+          /invalidated|receiving end does not exist/i.test(m)
+            ? "Extension reloaded — refresh this YouTube tab and try again."
+            : m || "Could not reach the extension."
+        );
+      }
 
-      const lang = result.languageCode || "";
-      const auto = result.kind === "asr" ? " · auto" : "";
+      const lang = result?.languageCode || "";
+      const auto = result?.kind === "asr" ? " · auto" : "";
       const bg = openInBackground ? " · background tab" : "";
+      const fallbackNote = transcriptOk ? "" : " No transcript in prompt — paste from YouTube or yt-dlp.";
 
       if (!res?.ok) {
         throw new Error(res?.error || "Could not open chat tab.");
       }
+      status.classList.remove("yts-ext-err");
       if (res.filled && res.autoSubmit) {
-        status.textContent = res.usedSubmitButton
-          ? `Prompt sent in new tab. (${lang}${auto}${bg})`
-          : `Filled and Enter sent — check the new tab. (${lang}${auto}${bg})`;
+        status.textContent =
+          (res.usedSubmitButton ? "Prompt sent in new tab." : "Filled and Enter sent — check the new tab.") +
+          ` (${lang}${auto}${bg})${fallbackNote}`;
       } else if (res.filled) {
-        status.textContent = `Prompt filled in new tab — review and send. (${lang}${auto}${bg})`;
+        status.textContent = `Prompt filled in new tab — review and send. (${lang}${auto}${bg})${fallbackNote}`;
       } else {
-        status.textContent = `Opened chat — ${res.hint || "Press Ctrl+V to paste."} (${lang}${auto}${bg})`;
+        status.textContent = `Opened chat — ${res.hint || "Press Ctrl+V to paste."} (${lang}${auto}${bg})${fallbackNote}`;
+      }
+      if (!transcriptOk) {
+        status.classList.add("yts-ext-status--long");
       }
     } catch (e) {
       status.classList.add("yts-ext-err");
-      status.textContent = e.message || "Failed.";
+      const msg = e.message || "Failed.";
+      status.classList.toggle("yts-ext-status--long", msg.length > 90);
+      status.textContent = msg;
     } finally {
       setBusy([triggerBtn], false);
     }
@@ -267,12 +381,19 @@ document.addEventListener(CAPTION_EVENT, (e) => {
 function scheduleMount() {
   requestAnimationFrame(() => {
     mountUI();
+    scheduleNativeTranscriptFontSize();
   });
 }
 
 function shouldTryMount() {
   if (!document.querySelector("ytd-watch-metadata")) return false;
-  if (!document.querySelector(".yts-ext-host")) return true;
+  const existing = document.querySelector(".yts-ext-host");
+  if (!existing) return true;
+  if (!document.body.contains(existing)) return true;
+  if (existing.offsetParent === null && !existing.closest("[hidden]")) {
+    if (!document.querySelector(".yts-ext-busy")) return true;
+  }
+  if (document.querySelector(".yts-ext-busy")) return false;
   const fallback = document.querySelector(".yts-ext-host--fallback");
   const inner = document.querySelector("#columns #secondary #secondary-inner");
   return !!(fallback && inner);
@@ -288,12 +409,79 @@ function repositionSidebarToolbar() {
   }
 }
 
+const NATIVE_TRANSCRIPT_FONT_PX = 12;
+let nativeTranscriptFontTimer = 0;
+
+function deepQueryTranscriptSegmentHosts(root = document.documentElement) {
+  const results = [];
+  const seen = new Set();
+  function visit(node) {
+    if (!node?.querySelectorAll) return;
+    try {
+      node.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model").forEach((el) => {
+        if (!seen.has(el)) {
+          seen.add(el);
+          results.push(el);
+        }
+      });
+      node.querySelectorAll("*").forEach((el) => {
+        if (el.shadowRoot) visit(el.shadowRoot);
+      });
+    } catch (_) {}
+  }
+  visit(root);
+  return results;
+}
+
+function applyNativeTranscriptFontSize() {
+  try {
+    deepQueryTranscriptSegmentHosts().forEach((el) => {
+      el.style.setProperty("font-size", `${NATIVE_TRANSCRIPT_FONT_PX}px`, "important");
+      el.style.setProperty("line-height", "1.35", "important");
+    });
+    const panel =
+      document.querySelector(
+        'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]'
+      ) || document.querySelector('ytd-engagement-panel-section-list-renderer[target-id*="transcript" i]');
+    if (panel) {
+      panel.style.setProperty("font-size", `${NATIVE_TRANSCRIPT_FONT_PX}px`, "important");
+    }
+    const tsp = document.querySelector("ytd-transcript-search-panel-renderer");
+    if (tsp) {
+      tsp.style.setProperty("font-size", `${NATIVE_TRANSCRIPT_FONT_PX}px`, "important");
+    }
+  } catch (_) {}
+}
+
+function scheduleNativeTranscriptFontSize() {
+  clearTimeout(nativeTranscriptFontTimer);
+  nativeTranscriptFontTimer = setTimeout(() => applyNativeTranscriptFontSize(), 100);
+}
+
 injectPageHook();
 
 document.addEventListener("yt-navigate-finish", () => {
   captionMeta = null;
   transcriptCache = null;
   scheduleMount();
+  scheduleNativeTranscriptFontSize();
+});
+
+function ensureToolbarAfterLayoutShift() {
+  const delays = [200, 500, 1000, 2000, 3500];
+  for (const ms of delays) {
+    setTimeout(() => {
+      const host = document.querySelector(".yts-ext-host");
+      if (!host || !document.body.contains(host) || host.offsetParent === null) {
+        scheduleMount();
+      }
+    }, ms);
+  }
+}
+
+document.addEventListener("yt-set-theater-mode-enabled", ensureToolbarAfterLayoutShift);
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement) ensureToolbarAfterLayoutShift();
 });
 
 if (document.readyState === "loading") {
@@ -307,6 +495,7 @@ const mo = new MutationObserver(() => {
     scheduleMount();
   } else {
     repositionSidebarToolbar();
+    scheduleNativeTranscriptFontSize();
   }
 });
 mo.observe(document.documentElement, { childList: true, subtree: true });

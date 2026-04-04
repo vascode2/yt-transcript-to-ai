@@ -1,0 +1,12 @@
+{
+  "name": "youtube-summary",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test",
+    "e2e:chromium": "cross-env USE_PLAYWRIGHT_CHROMIUM=1 playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "cross-env": "^7.0.3"
+  }
+}

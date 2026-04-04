@@ -103,10 +103,145 @@ function sentenceCaseStart(s) {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-const LEADING_CONN = /^(\s*(?:And|But|So|Yet|Plus|Also|Still|Oh|Well)\s+)+/i;
+function looksKorean(s) {
+  return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(String(s || ""));
+}
+
+/** Leftmost strong delimiter in [minPos, maxPos] (supports Korean / CJK punctuation). */
+function firstMajorDelimiterIndex(s, minPos, maxPos) {
+  const str = String(s || "");
+  const delims = [",", "，", "、", ";", "；"];
+  let best = -1;
+  for (const d of delims) {
+    let from = 0;
+    while (true) {
+      const i = str.indexOf(d, from);
+      if (i < 0) break;
+      if (d === "、" && i < 26) {
+        from = i + 1;
+        continue;
+      }
+      if (i >= minPos && i <= maxPos && (best < 0 || i < best)) {
+        best = i;
+      }
+      from = i + 1;
+    }
+  }
+  return best;
+}
+
+function maybeCapitalizeLabelPhrase(left) {
+  const t = String(left || "").trim();
+  if (!t) return t;
+  if (/^[a-z]/.test(t)) return sentenceCaseStart(t);
+  return t;
+}
+
+function normalizeForOverlap(s) {
+  return String(s || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/** True if title is mostly the same opening as body (extractive duplicate headings). */
+function overlapTooHigh(title, body, minChars = 28) {
+  const a = normalizeForOverlap(title).replace(/[,;:：，、.!?…]+$/u, "");
+  const b = normalizeForOverlap(body);
+  if (a.length < 12 || b.length < minChars) return false;
+  const take = Math.min(a.length, b.length, 120);
+  if (take < minChars) return false;
+  if (b.slice(0, take) === a.slice(0, take)) return true;
+  const prefix = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < prefix && a[i] === b[i]) i++;
+  const ratio = i / Math.min(a.length, b.length);
+  return i >= minChars && ratio >= 0.88;
+}
+
+function finalizeSectionTitle(title) {
+  let t = String(title || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[,;:，、]+$/u, "")
+    .trim();
+  if (!t) return "Main ideas";
+  if (t.length > 78) {
+    t = `${t.slice(0, 75)}…`;
+  }
+  if (/^[a-z]/.test(t)) {
+    return sentenceCaseStart(t);
+  }
+  return t;
+}
+
+function clauseTitleFromSentence(sentence) {
+  const a = stripLeadFillers(stripTranscriptCruft(String(sentence || ""))).trim();
+  if (!a) return "";
+  const idx = firstMajorDelimiterIndex(a, 24, 100);
+  if (idx < 0) {
+    return finalizeSectionTitle(truncateAtWord(a, 56));
+  }
+  const left = a.slice(0, idx).trim();
+  if (left.length < 14) {
+    return finalizeSectionTitle(truncateAtWord(a, 56));
+  }
+  return finalizeSectionTitle(left);
+}
 
 /**
- * Bold label = readable clause or lead-in (not a bag of rare keywords).
+ * If section heading repeats the first bullet (common in Korean / long clauses), pick another cue.
+ */
+function ensureDistinctSectionTitle(title, bullets, picked, sentences, scored, partIndex) {
+  if (!bullets.length || !picked.length) {
+    return finalizeSectionTitle(title);
+  }
+  const b0 = String(bullets[0].body || "").trim();
+  let t = finalizeSectionTitle(title);
+  if (!overlapTooHigh(t, b0)) {
+    return t;
+  }
+
+  const skip = new Set([String(picked[0].sentence || "").trim()]);
+  let t2 = sectionTitleFromSentences(sentences, scored, { skipSentences: skip });
+  if (!overlapTooHigh(t2, b0)) {
+    return t2;
+  }
+
+  if (picked[1]) {
+    skip.add(String(picked[1].sentence || "").trim());
+    t2 = sectionTitleFromSentences(sentences, scored, { skipSentences: skip });
+    if (!overlapTooHigh(t2, b0)) {
+      return t2;
+    }
+    const alt = clauseTitleFromSentence(picked[1].sentence);
+    if (alt && !overlapTooHigh(alt, b0)) {
+      return alt;
+    }
+  }
+
+  const ko = looksKorean(b0 + t);
+  return ko ? `이 구간 핵심 (${partIndex})` : `Key points (part ${partIndex})`;
+}
+
+const LEADING_CONN = /^(\s*(?:And|But|So|Yet|Plus|Also|Still|Oh|Well)\s+)+/i;
+
+/** Drop leading text from `full` when it repeats `labelPlain` (case-insensitive). */
+function bodyWithoutRedundantLabelPrefix(full, labelPlain) {
+  const L = String(labelPlain || "")
+    .replace(/:\s*$/, "")
+    .trim();
+  if (!L || !full) return full;
+  const fl = full.toLowerCase();
+  const ll = L.toLowerCase();
+  if (!fl.startsWith(ll)) return full;
+  let rest = full.slice(L.length).trim().replace(/^[,;:，、]\s*/, "").trim();
+  if (rest.length < 10) return full;
+  return maybeCapitalizeLabelPhrase(rest);
+}
+
+/**
+ * Bold label = skimmable topic line; body = continuation only (no repeating the label).
  */
 function naturalBulletFromSentence(sentence) {
   const raw = String(sentence || "").trim();
@@ -118,21 +253,14 @@ function naturalBulletFromSentence(sentence) {
 
   let s = body.replace(LEADING_CONN, "").trim() || body;
 
-  const commaIdx = s.indexOf(",");
-  if (commaIdx >= 22 && commaIdx <= 100) {
-    const left = s.slice(0, commaIdx).trim();
+  const dIdx = firstMajorDelimiterIndex(s, 22, 110);
+  if (dIdx >= 0) {
+    const left = s.slice(0, dIdx).trim();
     const wc = left.split(/\s+/).filter(Boolean).length;
-    if (wc >= 4 && wc <= 16 && left.length <= 88) {
-      return { label: `${sentenceCaseStart(left)}:`, body: s };
-    }
-  }
-
-  const semiIdx = s.indexOf(";");
-  if (semiIdx >= 18 && semiIdx <= 92) {
-    const left = s.slice(0, semiIdx).trim();
-    const wc = left.split(/\s+/).filter(Boolean).length;
-    if (wc >= 4 && wc <= 16) {
-      return { label: `${sentenceCaseStart(left)}:`, body: s };
+    if (wc >= 4 && wc <= 22 && left.length <= 92) {
+      const rest = s.slice(dIdx + 1).replace(/^\s+/, "").trim();
+      const bodyOut = rest.length >= 8 ? maybeCapitalizeLabelPhrase(rest) : s;
+      return { label: `${maybeCapitalizeLabelPhrase(left)}:`, body: bodyOut };
     }
   }
 
@@ -151,32 +279,57 @@ function naturalBulletFromSentence(sentence) {
 
   let labelText = words.join(" ");
   labelText = truncateAtWord(labelText, 64).replace(/\s+[,;:，、]+$/u, "").trim();
+  const label = `${maybeCapitalizeLabelPhrase(labelText)}:`;
+  const bodyOut = bodyWithoutRedundantLabelPrefix(s, labelText);
   return {
-    label: `${sentenceCaseStart(labelText)}:`,
-    body: s,
+    label,
+    body: bodyOut,
   };
 }
 
-function sectionTitleFromSentences(sentences, scoredRows) {
+function sectionTitleFromSentences(sentences, scoredRows, options = {}) {
   const list = Array.isArray(sentences) ? sentences : [];
   if (!list.length) {
     return "Main ideas";
   }
 
+  const skip =
+    options.skipSentences instanceof Set ? options.skipSentences : new Set([...(options.skipSentences || [])]);
+
   const usable = list.filter((s) => !isMetadataSentence(s));
   const pool = usable.length ? usable : list;
 
-  let primary = pool[0];
-  if (Array.isArray(scoredRows) && scoredRows.length) {
-    const byScore = [...scoredRows].sort((a, b) => b.score - a.score);
-    const best = byScore.find((row) => row.sentence && !isMetadataSentence(row.sentence));
-    if (best && best.sentence) {
-      primary = best.sentence;
+  const norm = (x) => String(x || "").trim();
+
+  function pickPrimary() {
+    if (Array.isArray(scoredRows) && scoredRows.length) {
+      const byScore = [...scoredRows].sort((a, b) => b.score - a.score);
+      const best = byScore.find(
+        (row) => row.sentence && !isMetadataSentence(row.sentence) && !skip.has(norm(row.sentence))
+      );
+      if (best && best.sentence) {
+        return best.sentence;
+      }
     }
+    const fromPool = pool.find((s) => !skip.has(norm(s)));
+    return fromPool || pool[0];
   }
 
+  let primary = pickPrimary();
+
   const a = stripLeadFillers(stripTranscriptCruft(primary)).trim();
-  let title = truncateAtWord(a, 72).replace(/[`'"“”]+$/, "").replace(/[,;:，、]\s*$/u, "").trim();
+  const clauseAt = firstMajorDelimiterIndex(a, 26, 98);
+  let title;
+  if (clauseAt >= 0) {
+    const clause = a.slice(0, clauseAt).trim();
+    const wc = clause.split(/\s+/).filter(Boolean).length;
+    if (wc >= 4 && clause.length <= 88) {
+      title = clause;
+    }
+  }
+  if (!title) {
+    title = truncateAtWord(a, 72).replace(/[`'"“”]+$/, "").replace(/[,;:，、]\s*$/u, "").trim();
+  }
 
   if (title.length < 18 && pool[1]) {
     const b = stripLeadFillers(stripTranscriptCruft(pool[1])).trim();
@@ -186,15 +339,7 @@ function sectionTitleFromSentences(sentences, scoredRows) {
     }
   }
 
-  title = String(title || "").trim().replace(/\s+/g, " ");
-  if (!title) {
-    return "Main ideas";
-  }
-  if (title.length > 78) {
-    title = `${title.slice(0, 75)}…`;
-  }
-  const c = title.charAt(0);
-  return (c ? c.toUpperCase() + title.slice(1) : title).replace(/[,;:，、]+$/u, "").trim() || "Main ideas";
+  return finalizeSectionTitle(title);
 }
 
 const STOP_WORDS = new Set([
@@ -757,8 +902,11 @@ function buildSummarySections(segments, videoId) {
       };
     });
 
+    let secTitle = sectionTitleFromSentences(sentences, scored);
+    secTitle = ensureDistinctSectionTitle(secTitle, bullets, picked, sentences, scored, sections.length + 1);
+
     sections.push({
-      title: sectionTitleFromSentences(sentences, scored),
+      title: secTitle,
       sectionStartSec: Math.floor(t0),
       sectionEndSec: Math.floor(t1),
       bullets,
@@ -800,8 +948,10 @@ function buildSummarySections(segments, videoId) {
         href: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${Math.floor(startSec)}s`,
       };
     });
+    let secTitle = sectionTitleFromSentences(sentences, scored);
+    secTitle = ensureDistinctSectionTitle(secTitle, bullets, picked, sentences, scored, sections.length + 1);
     sections.push({
-      title: sectionTitleFromSentences(sentences, scored),
+      title: secTitle,
       sectionStartSec: Math.floor(t0),
       sectionEndSec: Math.floor(t1),
       bullets,
@@ -842,7 +992,39 @@ async function buildSummaryPayload(videoId, title, segments) {
         summarySource = "openai";
       }
     } catch (err) {
-      console.warn("[youtube-summary] OpenAI summarization failed; using extractive summary.", err.message || err);
+      console.warn("[youtube-summary] OpenAI summarization failed; trying Gemini, Ollama, or extractive.", err.message || err);
+    }
+  }
+
+  if (summarySource === "extractive") {
+    const geminiKey = process.env.GEMINI_API_KEY && String(process.env.GEMINI_API_KEY).trim();
+    if (geminiKey) {
+      try {
+        const { summarizeTranscriptGemini } = require(path.join(__dirname, "lib", "gemini-summarize.js"));
+        const gem = await summarizeTranscriptGemini(videoId, title, transcriptText, normalizedSegments);
+        if (Array.isArray(gem) && gem.length) {
+          summarySections = gem;
+          summarySource = "gemini";
+        }
+      } catch (err) {
+        console.warn("[youtube-summary] Gemini summarization failed; trying Ollama or extractive.", err.message || err);
+      }
+    }
+  }
+
+  if (summarySource === "extractive") {
+    const ollamaModel = process.env.OLLAMA_MODEL && String(process.env.OLLAMA_MODEL).trim();
+    if (ollamaModel) {
+      try {
+        const { summarizeTranscriptOllama } = require(path.join(__dirname, "lib", "ollama-summarize.js"));
+        const local = await summarizeTranscriptOllama(videoId, title, transcriptText, normalizedSegments);
+        if (Array.isArray(local) && local.length) {
+          summarySections = local;
+          summarySource = "ollama";
+        }
+      } catch (err) {
+        console.warn("[youtube-summary] Ollama summarization failed; using extractive summary.", err.message || err);
+      }
     }
   }
 

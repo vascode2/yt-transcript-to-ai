@@ -55,10 +55,10 @@ html[dark] .yts-ext-host--fallback {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 36px;
+  min-height: 34px;
   padding: 0 14px;
   font-family: "Roboto", "YouTube Noto", sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--yt-spec-text-primary, #0f0f0f);
   background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05));
@@ -96,7 +96,7 @@ html[dark] .yts-ext-copy-btn,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 10px;
   font-family: "Roboto", "YouTube Noto", sans-serif;
   font-size: 12px;
@@ -136,8 +136,16 @@ html[dark] .yts-ext-ai-btn {
 .yts-ext-status {
   font-family: "Roboto", "YouTube Noto", sans-serif;
   font-size: 12px;
-  line-height: 1.35;
+  line-height: 1.4;
   color: var(--yt-spec-text-secondary, #606060);
+  max-width: 100%;
+}
+
+.yts-ext-status--long {
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+  display: block;
   max-width: 100%;
 }
 
@@ -152,4 +160,22 @@ html[dark] .yts-ext-status,
 
 html[dark] .yts-ext-status.yts-ext-err {
   color: #ff6b6b;
+}
+
+/* Native YouTube transcript panel — slightly smaller type */
+ytd-transcript-search-panel-renderer,
+ytd-transcript-body-renderer,
+ytd-transcript-segment-list-renderer {
+  font-size: 12px !important;
+}
+
+ytd-transcript-segment-renderer,
+transcript-segment-view-model {
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"],
+ytd-engagement-panel-section-list-renderer[target-id*="transcript" i] {
+  font-size: 12px !important;
 }
