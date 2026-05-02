@@ -4,6 +4,8 @@ A Chrome / Brave extension that adds a **Copy transcript** button to every YouTu
 
 A small Node app (`server.js`) ships alongside as an optional fallback for videos where the in-browser copy path can't reach the captions — see [Optional: localhost summarizer](#optional-localhost-summarizer) at the bottom.
 
+> 📊 **Visual walkthrough:** [Open the explainer](https://htmlpreview.github.io/?https://github.com/vascode2/yt-transcript-to-ai/blob/main/docs/Youtube-summary-explainer.html) — a single-page dashboard that walks through the install, the toolbar, the data flow, and what each button does. Source: [docs/Youtube-summary-explainer.html](docs/Youtube-summary-explainer.html).
+
 ---
 
 ## Chrome / Brave extension (the main thing)
