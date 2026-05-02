@@ -295,8 +295,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .executeScript({
         target: { tabId, allFrames: false },
         world: "MAIN",
-        args: [langPrefs, message.expectedVideoId || ""],
-        func: async (prefs, expectedVideoId) => {
+        args: [langPrefs, message.expectedVideoId || "", message.aggressive !== false],
+        func: async (prefs, expectedVideoId, aggressive) => {
           function getPlayerResponse() {
             try {
               const a = window.ytInitialPlayerResponse;
@@ -1204,6 +1204,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               languageCode: lang.languageCode,
               kind: lang.kind,
               source: domTry.source,
+            };
+          }
+
+          // Skip the panel-opening tier during prefetch so the extension
+          // never opens YouTube's transcript UI on its own. The user's
+          // explicit Copy click runs with aggressive=true and may open it.
+          if (!aggressive) {
+            return {
+              ok: false,
+              error: "prefetch_no_captions_yet",
             };
           }
 

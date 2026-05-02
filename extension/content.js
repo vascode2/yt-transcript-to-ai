@@ -103,13 +103,15 @@ async function copyToClipboard(text) {
   return false;
 }
 
-async function fetchTranscriptFromPage(expectedVideoId) {
+async function fetchTranscriptFromPage(expectedVideoId, opts) {
+  const aggressive = opts?.aggressive !== false;
   let bridge;
   try {
     bridge = await chrome.runtime.sendMessage({
       type: "YTS_FETCH_TRANSCRIPT",
       langPrefs: LANG_PREFS,
       expectedVideoId: expectedVideoId || "",
+      aggressive,
     });
   } catch (err) {
     const m = String(err?.message || err || "");
@@ -143,7 +145,15 @@ function prefetchTranscript() {
     if (prefetchInFlight && prefetchInFlight.vid === vid) return;
     const p = (async () => {
       try {
-        await getTranscriptBundle();
+        // Quiet prefetch: HTTP-only tiers (timedtext + InnerTube). Do NOT
+        // open YouTube's transcript panel — that’s reserved for the user’s
+        // explicit Copy click.
+        const result = await fetchTranscriptFromPage(vid, { aggressive: false });
+        if (result?.text) {
+          const title = videoTitleGuess();
+          const formatted = formatCopyBlock(title, result.videoId || vid, result.text);
+          transcriptCache = { vid, result, formatted };
+        }
       } catch (_) {
         // Silent — the user will see real errors when they click Copy.
       } finally {
