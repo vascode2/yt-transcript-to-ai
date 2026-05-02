@@ -35,6 +35,16 @@ Sometimes YouTube doesn't expose the transcript right away. The fix takes 5 seco
 
 Opening YouTube's own transcript wakes up the data the extension reads. If it still fails, the video probably doesn't have captions (livestreams, music videos, very new uploads).
 
+### Brave + long videos
+
+Brave's privacy hardening sometimes blocks YouTube's transcript API on long (1h+) videos — even YouTube's own transcript panel hangs forever in that case. The extension automatically falls back to a **localhost yt-dlp server** if you have one running:
+
+```powershell
+node server.js
+```
+
+Leave it running in a terminal. When the in-browser path fails, the extension calls `http://localhost:3000/api/transcript`, fetches the captions via `yt-dlp` (which doesn't go through the browser at all), and you'll see *"Copied (English, via local server)."* If the server isn't running, you get the normal error message — no harm done.
+
 ---
 
 ## Requirements

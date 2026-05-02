@@ -1076,6 +1076,73 @@ async function summarizeYoutubeUrl(youtubeUrl) {
   return await buildSummaryPayload(videoId, title, transcriptSegments);
 }
 
+async function fetchTranscriptOnly(youtubeUrl) {
+  const videoId = extractVideoId(youtubeUrl);
+  const helperPath = path.join(__dirname, "scripts", "fetch_transcript.py");
+  const py = resolvePythonForTranscript();
+  const argv = [...py.argvPrefix, "-u", helperPath, youtubeUrl];
+
+  const helperOutput = await new Promise((resolve, reject) => {
+    execFile(
+      py.executable,
+      argv,
+      {
+        cwd: __dirname,
+        maxBuffer: 10_000_000,
+        encoding: "utf8",
+        env: childEnvForTranscriptHelper(),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const extra = error.code === "ENOENT" ? py.hint || "" : "";
+          reject(new Error((stderr.trim() || error.message || "Failed to fetch transcript.") + extra));
+          return;
+        }
+        try {
+          resolve(parseTranscriptHelperJson(stdout));
+        } catch (parseError) {
+          reject(parseError);
+        }
+      }
+    );
+  });
+
+  const segments = helperOutput.segments || [];
+  const text = stripTranscriptCruft(segments.map((s) => s.text || "").join(" "))
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    ok: true,
+    videoId,
+    title: helperOutput.title || "",
+    text,
+    languageCode: helperOutput.languageCode || "",
+    kind: helperOutput.kind || "",
+    source: "yt-dlp",
+  };
+}
+
+function handleTranscriptApi(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed." });
+    return;
+  }
+  parseRequestBody(req)
+    .then(async (body) => {
+      if (!body?.url || typeof body.url !== "string") {
+        sendJson(res, 400, { error: "A YouTube URL is required." });
+        return;
+      }
+      const result = await fetchTranscriptOnly(body.url);
+      sendJson(res, 200, result);
+    })
+    .catch((error) => {
+      const statusCode = /required|valid|unsupported/i.test(error.message) ? 400 : 500;
+      sendJson(res, statusCode, { error: error.message || "Something went wrong." });
+    });
+}
+
 function handleApi(req, res) {
   if (req.method !== "POST") {
     sendJson(res, 405, { error: "Method not allowed." });
@@ -1100,6 +1167,22 @@ function handleApi(req, res) {
 
 const server = http.createServer((req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host}`);
+
+  // CORS for the unpacked extension (chrome-extension:// origins) so the
+  // extension's content/background scripts can call /api/transcript.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (reqUrl.pathname === "/api/transcript") {
+    handleTranscriptApi(req, res);
+    return;
+  }
 
   if (reqUrl.pathname === "/api/summarize") {
     handleApi(req, res);

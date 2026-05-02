@@ -112,8 +112,7 @@ async function fetchTranscriptFromPage(expectedVideoId, opts) {
       langPrefs: LANG_PREFS,
       expectedVideoId: expectedVideoId || "",
       aggressive,
-    });
-  } catch (err) {
+    });  } catch (err) {
     const m = String(err?.message || err || "");
     if (/invalidated|receiving end does not exist/i.test(m)) {
       throw new Error("Extension was reloaded — please refresh this page (F5).");
@@ -164,6 +163,70 @@ function prefetchTranscript() {
     })();
     prefetchInFlight = { vid, promise: p };
   } catch (_) { /* never throw from prefetch */ }
+}
+
+/**
+ * Last-resort fallback: ask the localhost server (yt-dlp running outside
+ * the browser) for the transcript. Bypasses Brave Shields / fingerprint
+ * protection / network-layer interference. Silent if the server isn't
+ * running (returns false). On success: copies, sets status, returns true.
+ */
+async function tryLocalServerFallback(status, copyBtn) {
+  reconcileVideoIdentity();
+  const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+  if (!vid) return false;
+  const url = `https://www.youtube.com/watch?v=${vid}`;
+
+  const prevStatus = status.textContent;
+  status.classList.remove("yts-ext-err", "yts-ext-status--long");
+  status.textContent = "Trying localhost yt-dlp server…";
+
+  let resp;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    resp = await fetch("http://localhost:3000/api/transcript", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+  } catch (_) {
+    // Server not running / not reachable. Restore prior status.
+    status.textContent = prevStatus;
+    return false;
+  }
+
+  if (!resp.ok) {
+    status.textContent = prevStatus;
+    return false;
+  }
+
+  let data;
+  try { data = await resp.json(); } catch (_) {
+    status.textContent = prevStatus;
+    return false;
+  }
+  if (!data?.text) {
+    status.textContent = prevStatus;
+    return false;
+  }
+
+  const title = data.title || videoTitleGuess();
+  const formatted = formatCopyBlock(title, data.videoId || vid, data.text);
+  transcriptCache = { vid, result: data, formatted };
+
+  const ok = await copyToClipboard(formatted);
+  if (!ok) {
+    status.textContent = "Transcript ready (via local server) — click Copy again to copy to clipboard.";
+    return true;
+  }
+  const langCode = data.languageCode || "";
+  const langNames = { en: "English", ko: "Korean", ja: "Japanese", zh: "Chinese", es: "Spanish", fr: "French", de: "German", pt: "Portuguese" };
+  const langLabel = langNames[langCode] || langNames[langCode.split("-")[0]] || langCode;
+  status.textContent = `Copied${langLabel ? ` (${langLabel}, via local server)` : " (via local server)"}.`;
+  return true;
 }
 
 async function getTranscriptBundle() {
@@ -329,10 +392,17 @@ function mountUI() {
       const autoLabel = result.kind === "asr" ? ", auto-generated" : "";
       status.textContent = `Copied${langLabel ? ` (${langLabel}${autoLabel})` : ""}.`;
     } catch (e) {
+      // In-browser tiers failed (common in Brave on long videos). Try the
+      // localhost server (yt-dlp running outside the browser) before giving
+      // up. Silent if the server isn't running.
+      const localOk = await tryLocalServerFallback(status, copyBtn);
+      if (localOk) return;
+
       status.classList.add("yts-ext-err");
       const msg = e.message || "Copy failed.";
-      status.classList.toggle("yts-ext-status--long", msg.length > 90);
-      status.textContent = msg;
+      const augmented = msg + "\nTip: run `node server.js` locally to bypass browser blocks.";
+      status.classList.add("yts-ext-status--long");
+      status.textContent = augmented;
     } finally {
       setBusy([copyBtn], false);
     }
