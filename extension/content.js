@@ -305,9 +305,29 @@ function mountUI() {
     };
 
     try {
+      const fetchStartedAt = Date.now();
+      const wasCached = !!(transcriptCache && transcriptCache.vid === (videoIdFromUrl() || captionMeta?.videoId || ""));
       const { vid, result, formatted } = await withRetryStatus();
+      const elapsed = Date.now() - fetchStartedAt;
+
+      // Chrome only honors a recent user click for ~5s when calling
+      // navigator.clipboard.writeText(). If the fetch took longer than that,
+      // the user-activation token has expired and the clipboard write will
+      // fail with NotAllowedError. Rather than show a confusing
+      // "Clipboard blocked" error, prime the cache and ask the user to click
+      // again — the second click is instant because the transcript is cached.
+      const userActivationLikelyExpired = !wasCached && elapsed > 4500;
+      if (userActivationLikelyExpired) {
+        status.textContent = "Transcript ready — click Copy again to copy to clipboard.";
+        return;
+      }
+
       const ok = await copyToClipboard(formatted);
-      if (!ok) throw new Error("Clipboard blocked — click the page first, then try again.");
+      if (!ok) {
+        // Cache is now warm; next click will be instant. Tell the user that.
+        status.textContent = "Transcript ready — click Copy again to copy to clipboard.";
+        return;
+      }
       const langCode = result.languageCode || "";
       const langNames = { en: "English", ko: "Korean", ja: "Japanese", zh: "Chinese", es: "Spanish", fr: "French", de: "German", pt: "Portuguese" };
       const langLabel = langNames[langCode] || langNames[langCode.split("-")[0]] || langCode;
