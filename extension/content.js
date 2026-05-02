@@ -310,22 +310,17 @@ function mountUI() {
       const { vid, result, formatted } = await withRetryStatus();
       const elapsed = Date.now() - fetchStartedAt;
 
-      // Chrome only honors a recent user click for ~5s when calling
-      // navigator.clipboard.writeText(). If the fetch took longer than that,
-      // the user-activation token has expired and the clipboard write will
-      // fail with NotAllowedError. Rather than show a confusing
-      // "Clipboard blocked" error, prime the cache and ask the user to click
-      // again — the second click is instant because the transcript is cached.
-      const userActivationLikelyExpired = !wasCached && elapsed > 4500;
-      if (userActivationLikelyExpired) {
-        status.textContent = "Transcript ready — click Copy again to copy to clipboard.";
-        return;
-      }
-
+      // Always try to write the clipboard — Chrome's user-activation window
+      // is fuzzy and often longer than 5s. Only fall back to the
+      // "click again" message if the write actually fails.
       const ok = await copyToClipboard(formatted);
       if (!ok) {
-        // Cache is now warm; next click will be instant. Tell the user that.
-        status.textContent = "Transcript ready — click Copy again to copy to clipboard.";
+        // Cache is now warm; next click is instant. Tell the user that
+        // instead of the cryptic "Clipboard blocked" message.
+        const reason = !wasCached && elapsed > 4500
+          ? "Transcript ready — click Copy again to copy to clipboard."
+          : "Clipboard blocked — click the page first, then try again.";
+        status.textContent = reason;
         return;
       }
       const langCode = result.languageCode || "";
