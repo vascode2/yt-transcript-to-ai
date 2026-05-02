@@ -13,3 +13,12 @@ pyerr.txt
 rawout.bin
 out.json
 err.txt
+
+# editor / agent state
+.claude/
+.vscode/
+
+# local debug scratch
+debug_output.js
+output.txt
+

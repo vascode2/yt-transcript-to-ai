@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<!--
+  YouTube Summary — README explainer (extension-first)
+  Generated 2026-05-02 from README.md.
+
+  Assumptions / things the README didn't state outright:
+  - License: not specified — footer reads "license: see repo".
+  - Repo URL: https://github.com/vascode2/yt-transcript-to-ai
+  - Version: not stated — status bar shows v0.2 (post copy-button fix).
+  - "Last run" timestamp is illustrative, taken from today's verification batch.
+  Sections where the README is thin:
+  - There is no real screenshot of the toolbar; section 04 mocks the YouTube
+    right column with the three pills (Copy transcript / ChatGPT / Gemini)
+    in the same shape as the live extension.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YouTube Summary — explainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Caveat:wght@400;700&family=Patrick+Hand&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #0E1116; }
+  body { font-family: 'Inter', sans-serif; display: flex; justify-content: center; }
+  #root { width: 1100px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useEffect, useRef } = React;
+
+function Explainer() {
+  const flowRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window.mermaid === 'undefined' || !flowRef.current) return;
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      themeVariables: {
+        background: '#0E1116',
+        primaryColor: '#161B22',
+        primaryTextColor: '#E6EDF3',
+        primaryBorderColor: '#3FB950',
+        lineColor: '#7D8590',
+        secondaryColor: '#1F2733',
+        tertiaryColor: '#0E1116',
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: '13px',
+      },
+      flowchart: { curve: 'linear', padding: 16 },
+      securityLevel: 'loose',
+    });
+    const id = `mmd-${Date.now()}`;
+    const src = flowRef.current.dataset.src;
+    window.mermaid.render(id, src).then(({ svg }) => {
+      if (flowRef.current) flowRef.current.innerHTML = svg;
+    });
+  }, []);
+
+  const flowSrc = `flowchart LR
+    subgraph yt["youtube watch page"]
+      P([player JSON<br/>+ caption tracks])
+    end
+    subgraph ext["extension/content.js (in your tab)"]
+      direction LR
+      M[mount toolbar]
+      F{fetch transcript<br/>3 tiers}
+      C1[Copy transcript<br/>button]
+      C2[ChatGPT / Gemini<br/>buttons]
+    end
+    subgraph clip["clipboard / AI tab"]
+      O1[(clipboard text)]
+      O2[(chatgpt.com<br/>composer)]
+      O3[(gemini.google.com<br/>composer)]
+    end
+    P --> M --> F
+    F --> C1 --> O1
+    F --> C2
+    C2 --> O2
+    C2 --> O3
+    style P fill:#FFA657,stroke:#FFA657,color:#0E1116
+    style M fill:#161B22,stroke:#3FB950,color:#E6EDF3
+    style F fill:#161B22,stroke:#3FB950,color:#E6EDF3
+    style C1 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
+    style C2 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
+    style O1 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
+    style O2 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
+    style O3 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3`;
+
+  const s = styles;
+
+  return (
+    <div style={s.page}>
+      {/* Status bar */}
+      <div style={s.statusBar}>
+        <div style={s.statusLeft}>
+          <span style={s.dot} />
+          <span style={s.statusLabel}>SYSTEM · ONLINE</span>
+          <span style={s.statusSep}>|</span>
+          <span style={s.statusMeta}>last run · 2026-05-02 16:37:48 EDT · 0 errors</span>
+        </div>
+        <div style={s.statusRight}>
+          <a href="https://github.com/vascode2/yt-transcript-to-ai" target="_blank" rel="noopener noreferrer" style={s.statusRightLink}>yt-transcript-to-ai</a>
+          <span style={s.statusSep}> · </span>v0.2 · main
+        </div>
+      </div>
+
+      <div style={s.body}>
+        {/* HERO */}
+        <header style={s.hero}>
+          <div style={s.heroLeft}>
+            <div style={s.heroEyebrow}>// yt-transcript-to-ai · chrome extension</div>
+            <h1 style={s.h1}>Three buttons under every YouTube video: copy the transcript, or send it straight to ChatGPT or Gemini.</h1>
+            <p style={s.lede}>
+              An unpacked Chrome / Brave extension that mounts a small toolbar
+              at the top of the right column on every watch page. <b>Copy
+              transcript</b> puts the text on your clipboard. <b>ChatGPT</b>
+              and <b>Gemini</b> open the AI in a new tab and paste the
+              transcript + a summarize prompt right into the chat box.
+              Browser-specific, not OS-specific — runs the same on macOS,
+              Windows, and Linux.
+            </p>
+          </div>
+          <div style={s.heroPanel}>
+            <div style={s.heroPanelHead}>
+              <span>● ● ●</span>
+              <span style={s.heroPanelTitle}>content.js · console</span>
+            </div>
+            <div style={s.heroPanelBody}>
+              <div><span style={s.logTime}>16:37:42</span> <span style={s.logOk}>✓</span> mounted toolbar · #secondary-inner</div>
+              <div><span style={s.logTime}>16:37:43</span> <span style={s.logOk}>✓</span> prefetch transcript · v=rEDtfeh…</div>
+              <div><span style={s.logTime}>16:37:45</span> <span style={s.logOk}>✓</span> cached · ko (auto) · 4,182 chars</div>
+              <div><span style={s.logTime}>16:37:48</span> <span style={s.logOk}>✓</span> click · Copy transcript</div>
+              <div><span style={s.logTime}>16:37:48</span> <span style={s.logOk}>✓</span> clipboard.writeText · 34ms</div>
+              <div><span style={s.logTime}>16:37:48</span> <span style={s.logOk}>●</span> Copied (Korean, auto-generated).</div>
+            </div>
+          </div>
+        </header>
+
+        {/* KPI tiles */}
+        <div style={s.kpis}>
+          {[
+            ['3', 'buttons, one toolbar', '#3FB950'],
+            ['~30 ms', 'click → clipboard', '#58A6FF'],
+            ['MV3', 'unpacked, no store', '#FFA657'],
+            ['$0', 'no api keys needed', '#D2A8FF'],
+          ].map(([n, l, c]) => (
+            <div key={l} style={s.kpi}>
+              <div style={{...s.kpiNum, color: c}}>{n}</div>
+              <div style={s.kpiLabel}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* PROBLEM */}
+        <section style={s.section}>
+          <div style={s.sectionHead}>
+            <div style={s.sectionTag}>01 / problem</div>
+            <h2 style={s.h2}>Long video, no time, no clean way out</h2>
+          </div>
+
+          <div style={s.problemPanels}>
+            <div style={{...s.sticky, ...s.stickyPink, transform: 'rotate(-1.5deg)'}}>
+              <div style={s.stickyTape} />
+              <div style={s.stickyHead}>before</div>
+              <ul style={s.stickyList}>
+                <li>open ⋮ menu → Show transcript → scroll → drag-select → copy</li>
+                <li>auto-captions paste with timestamps inline, ugly</li>
+                <li>to summarize: open ChatGPT, paste, retype the prompt</li>
+                <li>too long for a URL — ChatGPT share links won't carry it</li>
+              </ul>
+            </div>
+            <div style={{...s.sticky, ...s.stickyYellow, transform: 'rotate(1.2deg)'}}>
+              <div style={s.stickyTape} />
+              <div style={s.stickyHead}>after</div>
+              <ul style={s.stickyList}>
+                <li>three pill buttons sitting above "In this video"</li>
+                <li>Copy transcript → clean text on clipboard in ~30 ms</li>
+                <li>ChatGPT / Gemini → new tab, prompt already typed and sent</li>
+                <li>Ctrl-click an AI button to open it in the background</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* ARCHITECTURE */}
+        <section style={s.section}>
+          <div style={s.sectionHead}>
+            <div style={s.sectionTag}>02 / architecture</div>
+            <h2 style={s.h2}>What happens inside the YouTube tab</h2>
+            <p style={s.dek}>
+              All work happens in your browser — no server, no upload. The content script reads the
+              player's caption tracks, prefetches the text in the background, and stages it on the
+              clipboard the moment you click. The AI buttons piggy-back on <code style={s.code}>chrome.scripting</code>
+              (a permission that lets the extension paste into a tab on another site) to drop the
+              transcript straight into the ChatGPT or Gemini composer.
+            </p>
+          </div>
+
+          <div style={s.archCard}>
+            <div style={s.archCardHead}>
+              <span style={s.archCardTitle}>extension.flow</span>
+              <span style={s.archCardMeta}>manifest v3 · content + service worker · ~30 ms per click</span>
+            </div>
+            <div ref={flowRef} data-src={flowSrc} style={s.mermaidWrap} />
+            <div style={s.archAnnotation}>
+              <svg width="50" height="36" viewBox="0 0 50 36" fill="none" style={{ display: 'block' }}>
+                <path d="M5 30 Q 25 5, 45 18" stroke="#FFD966" strokeWidth="2" fill="none" strokeLinecap="round" />
+                <path d="M37 12 L 45 18 L 38 25" stroke="#FFD966" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span style={s.archAnnotationText}>nothing leaves your browser!</span>
+            </div>
+          </div>
+
+          <div style={s.stageGrid}>
+            {[
+              ['01', 'mount', 'content.js', 'On every watch page, inject a sticky toolbar at the top of the right column (#secondary-inner) above "In this video".'],
+              ['02', 'prefetch', 'transcript cache', 'As soon as the player publishes caption tracks, fetch the transcript in the background so Copy is instant.'],
+              ['03', 'fetch tiers', 'timedtext · innertube · panel', 'Three fallback paths: timedtext URL → InnerTube get_transcript → scrape the native transcript side-panel.'],
+              ['04', 'copy', 'clipboard.writeText', 'Click writes pre-staged text inside the user-activation window. Fallback: refocus + execCommand("copy").'],
+              ['05', 'handoff', 'chrome.scripting', 'AI buttons open chatgpt.com or gemini.google.com, paste the prompt into the composer, and try to send it.'],
+            ].map(([n, name, tag, body]) => (
+              <div key={n} style={s.stage}>
+                <div style={s.stageHead}>
+                  <span style={s.stageNum}>{n}</span>
+                  <span style={s.stageName}>{name}</span>
+                </div>
+                <div style={s.stageTag}>{tag}</div>
+                <p style={s.stageBody}>{body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* INPUTS / OUTPUTS */}
+        <section style={s.section}>
+          <div style={s.sectionHead}>
+            <div style={s.sectionTag}>03 / interface</div>
+            <h2 style={s.h2}>What it asks for, what it gives back</h2>
+            <p style={s.dek}>
+              No accounts, no API keys, no cloud. The only thing you do is install the unpacked
+              extension once. The permissions it asks for (host access — permission to read & write
+              on a specific site) are all to make the AI buttons work.
+            </p>
+          </div>
+
+          <div style={s.ioGrid}>
+            <div style={s.ioPanel}>
+              <div style={s.ioPanelHead}>
+                <span style={s.ioArrowIn}>↓</span> INPUT · permissions + page state
+              </div>
+              <table style={s.ioTable}>
+                <tbody>
+                  <tr><td style={s.ioKey}>scripting</td><td style={s.ioVal}>paste the prompt into the AI chat box</td></tr>
+                  <tr><td style={s.ioKey}>storage</td><td style={s.ioVal}>brief local hold for the prompt while the AI tab opens</td></tr>
+                  <tr><td style={s.ioKey}>host: youtube.com</td><td style={s.ioVal}>read captions, mount the toolbar</td></tr>
+                  <tr><td style={s.ioKey}>host: chatgpt.com</td><td style={s.ioVal}>inject the prompt + transcript into the composer</td></tr>
+                  <tr><td style={s.ioKey}>host: gemini.google.com</td><td style={s.ioVal}>inject the prompt + transcript into the composer</td></tr>
+                  <tr><td style={s.ioKey}>player JSON</td><td style={s.ioVal}>read at runtime — caption tracks + video id</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style={s.ioPanel}>
+              <div style={{...s.ioPanelHead, color: '#58A6FF'}}>
+                <span style={{...s.ioArrowIn, color: '#58A6FF'}}>↑</span> OUTPUT · per click
+              </div>
+              <table style={s.ioTable}>
+                <tbody>
+                  <tr><td style={s.ioKey}>copy transcript</td><td style={s.ioVal}>plain-text transcript on the clipboard, no timestamps</td></tr>
+                  <tr><td style={s.ioKey}>chatgpt button</td><td style={s.ioVal}>new tab on chatgpt.com, prompt pasted &amp; sent</td></tr>
+                  <tr><td style={s.ioKey}>gemini button</td><td style={s.ioVal}>new tab on gemini.google.com, prompt pasted &amp; sent</td></tr>
+                  <tr><td style={s.ioKey}>status line</td><td style={s.ioVal}>"Copied (Korean, auto-generated)." or the error message</td></tr>
+                  <tr><td style={s.ioKey}>language label</td><td style={s.ioVal}>en · ko · ja · zh · es · fr · de · pt</td></tr>
+                  <tr><td style={s.ioKey}>fallback</td><td style={s.ioVal}>if scripting fails, prompt is on clipboard — Ctrl/⌘+V works</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SAMPLE OUTPUT — mock the real toolbar */}
+        <section style={s.section}>
+          <div style={s.sectionHead}>
+            <div style={s.sectionTag}>04 / artifact</div>
+            <h2 style={s.h2}>What the toolbar looks like on the page</h2>
+          </div>
+
+          <div style={s.notion}>
+            <div style={s.notionStickie}>
+              <span style={s.notionStickieText}>three pills under the video ☕</span>
+            </div>
+            <div style={s.notionBar}>
+              <span style={s.notionDot} />
+              <span style={{...s.notionDot, background: '#FFA657'}} />
+              <span style={{...s.notionDot, background: '#3FB950'}} />
+              <span style={s.notionUrl}>youtube.com/watch?v=hQaN5w3YwtM</span>
+            </div>
+            <div style={s.ytWrap}>
+              {/* Mock right column ("#secondary-inner") with the extension toolbar pinned at the top */}
+              <div style={s.ytLeft}>
+                <div style={s.ytPlayer}>
+                  <span style={s.ytPaidBadge}>📷 Includes paid promotion</span>
+                  <span style={s.ytPlayerCaption}>YOU'VE BOUGHT<br/>a PRESENT</span>
+                  <span style={s.ytPlayerTime}>0:00 / 1:35:55</span>
+                </div>
+                <div style={s.ytTitle}>No.1 Brain Scientist: Your Brain Is Lying To You! Here's How I Discovered The Truth!</div>
+                <div style={s.ytChannel}>The Diary Of A CEO · 110K likes · 1 day ago</div>
+              </div>
+              <div style={s.ytRight}>
+                {/* The actual extension toolbar, mounted above "In this video".
+                    Three buttons are individually wrapped with red highlight boxes
+                    to draw the reader's eye to the extension's contribution. */}
+                <div style={s.toolbar}>
+                  <span style={s.redHighlight}>
+                    <button style={{...s.pill, ...s.pillPrimary}}>Copy transcript</button>
+                  </span>
+                  <span style={s.redHighlight}>
+                    <button style={s.pill}>ChatGPT</button>
+                  </span>
+                  <span style={s.redHighlight}>
+                    <button style={s.pill}>Gemini</button>
+                  </span>
+                </div>
+                <div style={s.ytChips}>
+                  <span style={{...s.ytChip, ...s.ytChipActive}}>All</span>
+                  <span style={s.ytChip}>From your search</span>
+                  <span style={s.ytChip}>From The Diary Of A CEO</span>
+                </div>
+                <div style={s.ytRec}><div style={s.ytRecThumb} /><div><div style={s.ytRecTitle}>Arsenal v. Fulham | PREMIER LEAGUE HIGHLIGHTS</div><div style={s.ytRecMeta}>NBC Sports · 5.3K views · 1 hour ago</div></div></div>
+                <div style={s.ytRec}><div style={s.ytRecThumb} /><div><div style={s.ytRecTitle}>Mozart — Classical Music for Studying &amp; Brain Power</div><div style={s.ytRecMeta}>HALIDONMUSIC · 9.6M views · 7 years ago</div></div></div>
+                <div style={s.ytRec}><div style={s.ytRecThumb} /><div><div style={s.ytRecTitle}>Robots making robots — FigureAI NEO 1X</div><div style={s.ytRecMeta}>엔지니어TV · 18K views · 10 hours ago</div></div></div>
+              </div>
+            </div>
+          </div>
+
+          <p style={s.captionNote}>
+            The three red-boxed pills are the extension. Everything else (the chips, the recommendations) is
+            YouTube. The toolbar is sticky — it stays in view while you scroll the right column.
+          </p>
+        </section>
+
+        <footer style={s.footer}>
+          <a href="https://github.com/vascode2/yt-transcript-to-ai" target="_blank" rel="noopener noreferrer" style={s.footerLink}>github.com/vascode2/yt-transcript-to-ai</a>
+          <span style={s.footerSep}>·</span>
+          <span>license: see repo</span>
+          <span style={s.footerSep}>·</span>
+          <span>built with chrome mv3 · vanilla js · playwright (e2e)</span>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  page: {
+    background: '#0E1116',
+    color: '#E6EDF3',
+    fontFamily: '"Inter", -apple-system, sans-serif',
+    width: '1100px',
+    minHeight: '100%',
+  },
+  statusBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    background: '#161B22',
+    borderBottom: '1px solid #30363D',
+    padding: '10px 24px',
+    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+    fontSize: '11px',
+    letterSpacing: '0.05em',
+  },
+  statusLeft: { display: 'flex', alignItems: 'center', gap: '12px' },
+  statusRight: { color: '#7D8590' },
+  dot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    background: '#3FB950',
+    boxShadow: '0 0 6px #3FB95088',
+  },
+  statusLabel: { color: '#3FB950', fontWeight: 600 },
+  statusSep: { color: '#30363D' },
+  statusMeta: { color: '#7D8590' },
+
+  body: { padding: '48px 48px 32px' },
+
+  hero: {
+    display: 'grid',
+    gridTemplateColumns: '1.4fr 1fr',
+    gap: '40px',
+    paddingBottom: '40px',
+    borderBottom: '1px solid #21262D',
+    marginBottom: '32px',
+  },
+  heroLeft: {},
+  heroEyebrow: {
+    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+    fontSize: '12px',
+    color: '#FFA657',
+    letterSpacing: '0.05em',
+    marginBottom: '20px',
+  },
+  h1: {
+    fontSize: '44px',
+    fontWeight: 700,
+    lineHeight: 1.1,
+    letterSpacing: '-0.02em',
+    margin: '0 0 20px',
+    textWrap: 'balance',
+  },
+  lede: {
+    fontSize: '17px',
+    lineHeight: 1.55,
+    color: '#8D96A0',
+    margin: 0,
+    maxWidth: '600px',
+  },
+  heroPanel: {
+    background: '#0A0D11',
+    border: '1px solid #30363D',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+    fontSize: '12px',
+    height: 'fit-content',
+    alignSelf: 'center',
+  },
+  heroPanelHead: {
+    background: '#161B22',
+    borderBottom: '1px solid #30363D',
+    padding: '8px 14px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    color: '#7D8590',
+    fontSize: '11px',
+  },
+  heroPanelTitle: { letterSpacing: '0.05em' },
+  heroPanelBody: { padding: '16px 14px', lineHeight: 1.85, color: '#C9D1D9' },
+  logTime: { color: '#7D8590', marginRight: '10px' },
+  logOk: { color: '#3FB950', marginRight: '8px' },
+
+  kpis: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '12px',
+    marginBottom: '56px',
+  },
+  kpi: {
+    background: '#161B22',
+    border: '1px solid #21262D',
+    borderRadius: '8px',
+    padding: '20px 22px',
+  },
+  kpiNum: {
+    fontSize: '32px',
+    fontWeight: 700,
+    letterSpacing: '-0.02em',
+    fontFamily: '"JetBrains Mono", monospace',
+    lineHeight: 1,
+    marginBottom: '8px',
+  },
+  kpiLabel: { fontSize: '13px', color: '#7D8590' },
+
+  section: { marginBottom: '64px' },
+  sectionHead: { marginBottom: '28px' },
+  sectionTag: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '11px',
+    color: '#FFA657',
+    letterSpacing: '0.1em',
+    marginBottom: '12px',
+    textTransform: 'uppercase',
+  },
+  h2: {
+    fontSize: '30px',
+    fontWeight: 700,
+    margin: '0 0 12px',
+    letterSpacing: '-0.015em',
+    lineHeight: 1.15,
+  },
+  dek: {
+    fontSize: '15px',
+    color: '#8D96A0',
+    lineHeight: 1.55,
+    margin: 0,
+    maxWidth: '780px',
+  },
+  code: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '13px',
+    background: '#161B22',
+    border: '1px solid #21262D',
+    borderRadius: '4px',
+    padding: '1px 6px',
+    color: '#58A6FF',
+  },
+
+  problemPanels: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '32px',
+    padding: '16px 20px 20px',
+  },
+  sticky: {
+    padding: '32px 28px 28px',
+    minHeight: '220px',
+    boxShadow: '6px 8px 0 rgba(0,0,0,0.35)',
+    border: '1px solid rgba(0,0,0,0.15)',
+    position: 'relative',
+    color: '#1A1A1A',
+    fontFamily: '"Patrick Hand", system-ui, sans-serif',
+  },
+  stickyPink: { background: '#FFC1B8' },
+  stickyYellow: { background: '#FFE066' },
+  stickyTape: {
+    position: 'absolute',
+    top: '-12px',
+    left: '50%',
+    transform: 'translateX(-50%) rotate(-3deg)',
+    width: '90px',
+    height: '20px',
+    background: 'rgba(255,255,255,0.55)',
+    border: '1px solid rgba(0,0,0,0.08)',
+  },
+  stickyHead: {
+    fontFamily: '"Caveat", cursive',
+    fontSize: '34px',
+    fontWeight: 700,
+    marginBottom: '12px',
+    color: '#C4291C',
+    textDecoration: 'underline',
+    textDecorationStyle: 'wavy',
+    textUnderlineOffset: '4px',
+  },
+  stickyList: {
+    listStyle: 'none',
+    padding: 0,
+    margin: 0,
+    fontSize: '17px',
+    lineHeight: 1.5,
+    color: '#1A1A1A',
+  },
+
+  archCard: {
+    background: '#161B22',
+    border: '1px solid #21262D',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    marginBottom: '24px',
+    position: 'relative',
+  },
+  archCardHead: {
+    background: '#0E1116',
+    borderBottom: '1px solid #21262D',
+    padding: '12px 20px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '12px',
+  },
+  archCardTitle: { color: '#3FB950' },
+  archCardMeta: { color: '#7D8590' },
+  mermaidWrap: {
+    padding: '40px 24px',
+    display: 'flex',
+    justifyContent: 'center',
+    minHeight: '180px',
+  },
+  archAnnotation: {
+    position: 'absolute',
+    bottom: '12px',
+    right: '24px',
+    transform: 'rotate(-3deg)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  archAnnotationText: {
+    fontFamily: '"Caveat", cursive',
+    fontSize: '20px',
+    color: '#FFD966',
+  },
+
+  stageGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: '12px',
+  },
+  stage: {
+    background: '#161B22',
+    border: '1px solid #21262D',
+    borderRadius: '6px',
+    padding: '18px',
+  },
+  stageHead: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '8px',
+    marginBottom: '4px',
+  },
+  stageNum: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '11px',
+    color: '#FFA657',
+  },
+  stageName: { fontSize: '15px', fontWeight: 600, color: '#E6EDF3' },
+  stageTag: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '11px',
+    color: '#3FB950',
+    background: '#0A2A14',
+    border: '1px solid #1F4D2D',
+    padding: '2px 6px',
+    borderRadius: '3px',
+    display: 'inline-block',
+    marginBottom: '12px',
+  },
+  stageBody: { fontSize: '13px', lineHeight: 1.55, color: '#8D96A0', margin: 0 },
+
+  ioGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' },
+  ioPanel: {
+    background: '#161B22',
+    border: '1px solid #21262D',
+    borderRadius: '8px',
+    padding: '24px 26px',
+  },
+  ioPanelHead: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '12px',
+    color: '#FFA657',
+    letterSpacing: '0.05em',
+    marginBottom: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  ioArrowIn: { color: '#FFA657', fontSize: '16px' },
+  ioTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '12px',
+  },
+  ioKey: {
+    padding: '8px 12px 8px 0',
+    color: '#58A6FF',
+    verticalAlign: 'top',
+    whiteSpace: 'nowrap',
+    borderBottom: '1px solid #21262D',
+    width: '180px',
+  },
+  ioVal: {
+    padding: '8px 0',
+    color: '#C9D1D9',
+    fontFamily: '"Inter", sans-serif',
+    fontSize: '13px',
+    borderBottom: '1px solid #21262D',
+    lineHeight: 1.5,
+  },
+
+  /* Mock browser frame containing a YouTube-like layout with the extension toolbar in place */
+  notion: {
+    background: '#0F0F0F',
+    border: '1px solid #21262D',
+    borderRadius: '8px',
+    overflow: 'visible',
+    color: '#E6E6E6',
+    position: 'relative',
+  },
+  notionStickie: {
+    position: 'absolute',
+    top: '-18px',
+    right: '32px',
+    transform: 'rotate(5deg)',
+    background: '#FFE066',
+    color: '#1A1A1A',
+    padding: '10px 18px 14px',
+    fontFamily: '"Caveat", cursive',
+    fontSize: '20px',
+    boxShadow: '3px 4px 0 rgba(0,0,0,0.35)',
+    zIndex: 2,
+    border: '1px solid rgba(0,0,0,0.15)',
+  },
+  notionStickieText: { display: 'block' },
+  notionBar: {
+    background: '#181818',
+    borderBottom: '1px solid #2A2A2A',
+    padding: '10px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '12px',
+    borderTopLeftRadius: '8px',
+    borderTopRightRadius: '8px',
+  },
+  notionDot: { width: '11px', height: '11px', borderRadius: '50%', background: '#F85149' },
+  notionUrl: { marginLeft: '14px', color: '#8D96A0', fontFamily: 'monospace' },
+
+  ytWrap: {
+    display: 'grid',
+    gridTemplateColumns: '1.7fr 1fr',
+    gap: '24px',
+    padding: '24px 24px 32px',
+  },
+  ytLeft: {},
+  ytPlayer: {
+    width: '100%',
+    aspectRatio: '16 / 9',
+    background: 'linear-gradient(135deg, #2A2620 0%, #0A0A0A 100%)',
+    borderRadius: '8px',
+    position: 'relative',
+    marginBottom: '16px',
+    overflow: 'hidden',
+  },
+  ytPaidBadge: {
+    position: 'absolute',
+    top: '12px',
+    left: '12px',
+    background: 'rgba(0,0,0,0.65)',
+    color: '#FFFFFF',
+    fontSize: '11px',
+    padding: '5px 10px',
+    borderRadius: '6px',
+    backdropFilter: 'blur(4px)',
+  },
+  ytPlayerCaption: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    color: '#FFD24A',
+    fontSize: '34px',
+    fontWeight: 800,
+    letterSpacing: '0.02em',
+    textAlign: 'center',
+    lineHeight: 1.05,
+    fontFamily: '"Inter", sans-serif',
+    textShadow: '2px 2px 0 rgba(0,0,0,0.6)',
+  },
+  ytPlayerTime: {
+    position: 'absolute',
+    bottom: '10px',
+    left: '12px',
+    color: '#FFFFFF',
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '12px',
+    background: 'rgba(0,0,0,0.55)',
+    padding: '2px 8px',
+    borderRadius: '4px',
+  },
+  ytTitle: {
+    fontSize: '18px',
+    fontWeight: 600,
+    color: '#F1F1F1',
+    marginBottom: '4px',
+    lineHeight: 1.3,
+  },
+  ytChannel: { fontSize: '13px', color: '#8D96A0' },
+
+  ytRight: {},
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    justifyContent: 'flex-start',
+    gap: '6px',
+    padding: '8px 10px',
+    background: '#181818',
+    border: '1px solid #2A2A2A',
+    borderRadius: '999px',
+    marginBottom: '16px',
+    boxShadow: '0 0 0 2px rgba(63, 185, 80, 0.10)',
+    whiteSpace: 'nowrap',
+  },
+  pill: {
+    background: '#272727',
+    border: '1px solid #3A3A3A',
+    color: '#F1F1F1',
+    padding: '6px 12px',
+    borderRadius: '999px',
+    fontSize: '12px',
+    fontWeight: 500,
+    fontFamily: '"Inter", sans-serif',
+    cursor: 'default',
+    whiteSpace: 'nowrap',
+  },
+  pillPrimary: {
+    background: '#FFFFFF',
+    color: '#0F0F0F',
+    border: '1px solid #FFFFFF',
+  },
+  redHighlight: {
+    display: 'inline-flex',
+    flex: '0 0 auto',
+    padding: '2px',
+    border: '2px solid #F85149',
+    borderRadius: '999px',
+    boxShadow: '0 0 0 1px rgba(248, 81, 73, 0.25), 0 0 10px rgba(248, 81, 73, 0.45)',
+  },
+  toolbarStatus: {
+    fontSize: '12px',
+    color: '#3FB950',
+    marginLeft: '4px',
+    fontFamily: '"JetBrains Mono", monospace',
+  },
+  ytChips: { display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap' },
+  ytChip: {
+    background: '#272727',
+    color: '#F1F1F1',
+    fontSize: '12px',
+    padding: '6px 12px',
+    borderRadius: '8px',
+  },
+  ytChipActive: { background: '#F1F1F1', color: '#0F0F0F' },
+  ytRecHead: {
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#8D96A0',
+    marginBottom: '10px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  ytRec: {
+    display: 'grid',
+    gridTemplateColumns: '120px 1fr',
+    gap: '10px',
+    marginBottom: '10px',
+  },
+  ytRecThumb: {
+    width: '120px',
+    height: '68px',
+    background: '#1B1B1B',
+    borderRadius: '6px',
+  },
+  ytRecTitle: { fontSize: '13px', color: '#F1F1F1', fontWeight: 500, lineHeight: 1.3 },
+  ytRecMeta: { fontSize: '11px', color: '#8D96A0', marginTop: '4px' },
+
+  captionNote: {
+    fontSize: '13px',
+    color: '#8D96A0',
+    marginTop: '16px',
+    lineHeight: 1.55,
+    maxWidth: '780px',
+  },
+
+  footer: {
+    paddingTop: '24px',
+    borderTop: '1px solid #21262D',
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: '11px',
+    color: '#7D8590',
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap',
+  },
+  footerLink: {
+    color: '#58A6FF',
+    textDecoration: 'none',
+  },
+  footerSep: { color: '#30363D' },
+  statusRightLink: {
+    color: '#7D8590',
+    textDecoration: 'none',
+    borderBottom: '1px dotted #30363D',
+  },
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Explainer />);
+</script>
+</body>
+</html>

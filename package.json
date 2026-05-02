@@ -1,5 +1,5 @@
 {
-  "name": "youtube-summary",
+  "name": "yt-transcript-to-ai",
   "private": true,
   "scripts": {
     "test:e2e": "playwright test",

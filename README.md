@@ -1,90 +1,167 @@
 # YouTube Summary
 
-Small dependency-free Node app that accepts a YouTube URL, pulls available captions, and generates:
+A Chrome / Brave extension that adds a **Copy transcript** button to every YouTube watch page, plus one-click handoff buttons for **ChatGPT** and **Gemini** that paste the transcript into the chat for you.
 
-- a short summary
-- timestamped key points
-- a transcript preview
+A small Node app (`server.js`) ships alongside as an optional fallback for videos where the in-browser copy path can't reach the captions — see [Optional: localhost summarizer](#optional-localhost-summarizer) at the bottom.
 
-## Run locally
+---
+
+## Chrome / Brave extension (the main thing)
+
+The folder `extension/` is an **unpacked** Manifest V3 extension.
+
+### Install (one minute)
+
+1. Open Chrome or Brave → `chrome://extensions` (or `brave://extensions`).
+2. Turn on **Developer mode** (top-right toggle).
+3. Click **Load unpacked** → choose the `extension/` directory in this repo.
+
+That's it — open any YouTube watch page (`youtube.com/watch?v=…`) and you'll see a small toolbar pinned at the **top of the right column** (`#secondary-inner`), above "In this video" and the recommendation chips. The toolbar is **sticky** so it stays visible while you scroll.
+
+### What the buttons do
+
+| Button | What it copies | What else it does |
+|---|---|---|
+| **Copy transcript** | Plain text transcript of the current video | Status line shows the language and whether the captions were auto-generated. |
+| **ChatGPT** | A summarize prompt + the transcript | Opens chatgpt.com in a new tab and **injects the prompt into the composer**, then tries to send it. If injection fails, the prompt is on your clipboard — just press **Ctrl/⌘+V**. |
+| **Gemini** | Same prompt + transcript | Same flow against gemini.google.com. |
+
+**Tip:** **Ctrl/⌘+click** or **middle-click** an AI button to open that tab in the **background** so you stay on YouTube.
+
+### Why long transcripts go through the clipboard, not the URL
+
+URLs have a length limit (a few KB on most browsers); a real transcript can be tens of KB. The extension uses `chrome.scripting` to drop the prompt straight into the chat composer on the AI site. That's why it asks for host access to **chatgpt.com**, **chat.openai.com**, and **gemini.google.com** in addition to **youtube.com**.
+
+### How fetching works (and why "Copy" is fast now)
+
+When the toolbar mounts on a watch page, the extension **prefetches** the transcript in the background — by the time you click **Copy transcript**, the text is already in memory and the click completes in roughly 30 ms. This matters because Chrome's clipboard API only honors a recent user click for ~5 seconds; the old "click → fetch → copy" flow used to fail on slow fetches with `Clipboard blocked`. The fix lives in [`extension/content.js`](extension/content.js) (`prefetchTranscript()` plus a refocus-and-`execCommand` fallback).
+
+The transcript itself is sourced in three tiers — the extension tries each and stops at the first one that returns text:
+
+1. The video's `timedtext` URL exposed in the player JSON.
+2. The InnerTube `get_transcript` endpoint.
+3. Scraping the native transcript side-panel.
+
+### Permissions, plain English
+
+| Permission | Why |
+|---|---|
+| `scripting` | To paste the prompt into the ChatGPT / Gemini composer. |
+| `storage` | Briefly holds the prompt while the AI tab opens. |
+| Host: `youtube.com` | Read captions, mount the toolbar. |
+| Host: `chatgpt.com`, `chat.openai.com`, `gemini.google.com` | Inject the prompt into the chat box. |
+
+Chrome / Brave may ask you to re-approve host access after an update.
+
+---
+
+## Troubleshooting
+
+### "YouTube returned empty caption responses…"
+
+This message comes from the **extension** when it couldn't get usable text from YouTube's in-page caption URLs (or from scraping the transcript panel in time).
+
+**Easy fix that works most of the time** — open YouTube's own transcript panel once:
+
+1. Click the **⋮** (more) menu under the video.
+2. Click **Show transcript**.
+3. Wait until lines appear in the side panel.
+4. Click **Copy transcript** in the extension toolbar again.
+
+Opening the native transcript forces YouTube to lazy-load the caption data, which "wakes up" the same data the extension reads.
+
+**Still failing?** Try, in order:
+
+- Refresh the page, then open Show transcript, then click Copy.
+- Wait a few seconds after the video starts playing — some videos don't expose captions until the player is fully initialized.
+- Disable other YouTube extensions (ad-blockers and SponsorBlock can race with us for the player object).
+- Try a different browser profile.
+
+### "Clipboard blocked — click the page first, then try again."
+
+Should be rare now (the prefetch fix above). If you do see it, click anywhere on the page and click Copy again — Chrome requires the document to be focused for `navigator.clipboard.writeText`.
+
+---
+
+## Automated test (Playwright + Brave or Chromium)
+
+Headed browser test that loads `extension/`, opens a regression URL, clicks **Copy transcript**, and **fails** unless the status reads **Copied**.
+
+```powershell
+cd <repo-root>
+npm install
+npm run test:e2e                  # prefers Brave (common Windows paths) or BRAVE_PATH; else Playwright Chromium
+npm run e2e:chromium              # force Playwright's Chromium
+npx playwright install chromium   # only needed for the line above, first run
+```
+
+- Set `BRAVE_PATH` to your `brave.exe` if auto-detection misses it.
+- For repeated reproductions across many runs, use the loop harness:
+
+  ```powershell
+  .\scripts\copy-flake-loop.ps1 -Runs 10 -Url '<youtube-url>'
+  ```
+
+  It writes per-iteration diagnostics to `test-results/diag/batch-<ts>/` and stops early on a 5-pass streak.
+
+**Manual launch** (Brave with the unpacked extension preloaded, no Playwright):
+
+```powershell
+.\scripts\launch-brave-with-extension.ps1
+```
+
+---
+
+## Optional: localhost summarizer
+
+A small dependency-free Node app (`server.js`) that takes a YouTube URL, downloads captions with `yt-dlp` **outside** the browser tab, and renders a short summary, timestamped key points, and a transcript preview.
+
+**When to use it:** if the extension's in-page caption fetch keeps failing for a particular video, the localhost path uses a different code path (`yt-dlp` from your shell vs. the YouTube tab's player), so one can succeed where the other fails.
+
+### Run
 
 ```powershell
 python -m pip install --user yt-dlp
 node server.js
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
+Open <http://localhost:3000>.
 
-## Chrome extension (copy transcript on YouTube)
-
-The folder `extension/` is an **unpacked** Manifest V3 extension:
-
-1. Open Chrome → `chrome://extensions`
-2. Turn on **Developer mode**
-3. **Load unpacked** → choose the `extension` directory inside this repo
-
-On a watch page (`youtube.com/watch?v=…`), the toolbar is injected at the **top of the right column** (`#secondary-inner`), above “In this video” and recommendation chips, with **sticky** styling so it stays visible while you scroll. **Copy transcript** copies text only. **ChatGPT** and **Gemini** copy the same summarize prompt + transcript to the clipboard, open the site in a new tab, and the extension **injects the prompt into the chat box** when it can find the composer (long transcripts are too big for URL parameters, so this uses `chrome.scripting` on those origins). When injection succeeds, it also **tries to send** the message (submit button click, or simulated Enter if no button is found). **Ctrl/⌘+click** or **middle-click** an AI button to open that tab in the **background** and stay on YouTube. If the site UI changes and automation misses, use **Ctrl+V** or send manually. Permissions: **scripting**, **storage** (brief local hold for the prompt), and host access for **youtube.com**, **chatgpt.com**, **chat.openai.com**, and **gemini.google.com** — Chrome may ask you to approve host access after an update.
-
-#### Extension: “YouTube returned empty caption responses…”
-
-That message is from the **browser extension** only. It means: the extension could not get usable text from YouTube’s **in-page** caption URLs (or from scraping the transcript panel in time).
-
-**Why the localhost app can still summarize the same URL:** the Node app uses **yt-dlp** (and your Python helper) to download captions **outside** the YouTube tab. That is a different code path than the extension, which runs **inside** Chrome on the watch page and depends on what the embedded player exposes (and on cookies / experiments / `timedtext` responses). One path succeeding does **not** guarantee the other will.
-
-**What “open ⋮ → Show transcript once” does:** YouTube often lazy-loads caption data. Opening **Show transcript** from the **⋮** menu forces the client to fetch and render captions in the side panel, which can “wake up” the same data the extension needs. After lines appear in **In this video → Transcript**, try **Copy transcript** again (or refresh first, then open transcript, then copy).
-
-If it still fails: try another browser profile, disable other YouTube extensions temporarily, or use **Copy transcript** only after the video has played a few seconds so the player is fully initialized.
-
-### Extension: automated E2E (Playwright + Brave or Chromium)
-
-Headed browser test that loads the **unpacked** `extension/` folder, opens the regression URL `https://www.youtube.com/watch?v=YOhZd1-AkNk`, waits for **Copy transcript**, clicks it, and **fails** unless the status shows **Copied** (otherwise throws with the error line).
-
-```powershell
-cd <repo-root>
-npm install
-npx playwright install chromium   # only if you use npm run e2e:chromium
-npm run test:e2e                  # prefers Brave (common Windows paths) or BRAVE_PATH; else Playwright Chromium
-npm run e2e:chromium              # force Playwright’s Chromium
-```
-
-- Set **`BRAVE_PATH`** to your `brave.exe` if auto-detection misses it.
-- YouTube may show consent or block automation; if the test is flaky, use the manual launcher below.
-
-**Manual Brave + extension (same URL):**
-
-```powershell
-.\scripts\launch-brave-with-extension.ps1
-```
-
-Then confirm **Load extension** worked (`brave://extensions`), dismiss any cookie wall, and try **Copy transcript**.
-
-## Notes
-
-- The app works only for videos where YouTube exposes subtitles or auto-captions.
-- It uses `yt-dlp` to retrieve the transcript. By default it builds a **quick extractive** outline (no API key). That mode picks important sentences and splits them heuristically — it is **not** a semantic summary. For Korean (and other languages with sparse commas), headings can still look “transcript-y” compared with a model like Gemini. For **Gemini-style thematic sections** (e.g. “트럼프의 대국민 연설과 시장의 반응”), use one of the optional model paths below.
-
-### Summary quality: what to use
+### Summary quality: which mode to use
 
 | Mode | Cost | Typical look |
 |------|------|----------------|
-| **Quick extract** | Free | Sentence/chunk highlights; good for skimming, weaker “analyst” headings |
-| **Ollama** | Free, local | Much closer to a real outline; use a strong multilingual model (e.g. **Qwen 2.5**, **Mistral**) |
+| **Quick extract** | Free | Sentence highlights; good for skimming, weak "analyst" headings |
+| **Ollama** | Free, local | Real outline; use a strong multilingual model (e.g. **Qwen 2.5**, **Mistral**) |
 | **LM Studio** | Free, local | Same idea as OpenAI-compatible chat; set `OPENAI_BASE_URL` + a small model |
 | **Gemini API** | Free tier / paid | Often closest to the Gemini web app for structure and Korean |
 | **OpenAI API** | Paid | Strong JSON outlines; set `OPENAI_API_KEY` |
 
-**Chrome extension “Copy transcript”** still uses YouTube’s in-page captions; if that fails while this app works, use **Copy** on localhost (transcript panel) or keep using **Generate Summary** here — the extension and `yt-dlp` are different pipelines.
+Provider order: **OpenAI → Gemini → Ollama → Quick extract**. Each step runs only if the previous did not produce a summary.
 
-- **Optional — Gemini API:** create a key in [Google AI Studio](https://aistudio.google.com/), then set `GEMINI_API_KEY` before `node server.js`. Override the model with `GEMINI_SUMMARY_MODEL` (default `gemini-2.0-flash`; try `gemini-1.5-flash` if your project does not have 2.0). Chunking: `GEMINI_CHUNK_CHARS`, `GEMINI_ONESHOT_MAX_CHARS`. Order of attempt: **OpenAI → Gemini → Ollama → Quick extract** (each step only if the previous did not produce a summary).
-- **Optional — ChatGPT-style outline:** set `OPENAI_API_KEY` in the environment before `node server.js`. The server calls OpenAI in JSON mode: one request for shorter transcripts, or map (chunk) + reduce for very long text. Override the model with `OPENAI_SUMMARY_MODEL` (default `gpt-4o-mini`). Tune chunking with `OPENAI_CHUNK_CHARS` and `OPENAI_ONESHOT_MAX_CHARS` if needed.
-- **Optional — LM Studio (or any OpenAI-compatible local server):** start the server (e.g. LM Studio **Local Server**), note the base URL (often `http://localhost:1234/v1`). Set **`OPENAI_BASE_URL`** to that base (no trailing path beyond `/v1`), keep **`OPENAI_API_KEY`** set to any non-empty placeholder if your server ignores it (LM Studio commonly accepts `sk-local`). The app will call `{OPENAI_BASE_URL}/chat/completions` like the official API. Choose the loaded model name in **`OPENAI_SUMMARY_MODEL`**. If the server errors on JSON mode, set **`OPENAI_DISABLE_JSON_MODE=1`** (the model should still return JSON in its reply; parsing may be less reliable).
-- **Optional — local outline (Ollama, no cloud API):** install [Ollama](https://ollama.com), run `ollama pull llama3.2` (or `mistral`, etc.), leave `ollama serve` running (default **http://127.0.0.1:11434**). Then set `OLLAMA_MODEL` before starting the app, for example:
+<details>
+<summary>Provider configuration (env vars)</summary>
+
+- **Gemini API:** create a key in [Google AI Studio](https://aistudio.google.com/), set `GEMINI_API_KEY`. Override model with `GEMINI_SUMMARY_MODEL` (default `gemini-2.0-flash`). Chunking knobs: `GEMINI_CHUNK_CHARS`, `GEMINI_ONESHOT_MAX_CHARS`.
+- **OpenAI:** set `OPENAI_API_KEY`. Calls OpenAI in JSON mode (one request for short transcripts, map+reduce for long). Override with `OPENAI_SUMMARY_MODEL` (default `gpt-4o-mini`). Knobs: `OPENAI_CHUNK_CHARS`, `OPENAI_ONESHOT_MAX_CHARS`.
+- **LM Studio (or any OpenAI-compatible local server):** start the server, then set `OPENAI_BASE_URL` to e.g. `http://localhost:1234/v1`, keep `OPENAI_API_KEY` set to any placeholder (LM Studio accepts `sk-local`), and pick the loaded model with `OPENAI_SUMMARY_MODEL`. If the server errors on JSON mode, set `OPENAI_DISABLE_JSON_MODE=1`.
+- **Ollama (no cloud API):** install [Ollama](https://ollama.com), `ollama pull llama3.2` (or `mistral`, `qwen2.5`), leave `ollama serve` running (default `http://127.0.0.1:11434`). Set `OLLAMA_MODEL` before `node server.js`. Knobs: `OLLAMA_HOST`, `OLLAMA_CHUNK_CHARS` (default `2800`), `OLLAMA_ONESHOT_MAX_CHARS` (default `12000`). For Korean news-style outlines, try `qwen2.5` or `mistral`.
+
   ```powershell
   $env:OLLAMA_MODEL = "llama3.2"
   node server.js
   ```
-  If `OPENAI_API_KEY` or `GEMINI_API_KEY` is set, those run before Ollama; Ollama runs when `OLLAMA_MODEL` is set and no earlier provider produced a summary. Override the API base with `OLLAMA_HOST` if needed. For long transcripts, tune `OLLAMA_CHUNK_CHARS` (default `2800`) and `OLLAMA_ONESHOT_MAX_CHARS` (default `12000`). For Korean news-style outlines, try **`qwen2.5`** or **`mistral`**.
+
+</details>
+
+### Notes
+
+- Works only for videos where YouTube exposes subtitles or auto-captions.
+- The default **Quick extract** is heuristic, not a real semantic summary — for thematic Korean / Japanese outlines, use Gemini or a strong Ollama model.
+
+---
 
 ## Requirements
 
-- **Node.js 18+** (uses `fetch` for optional OpenAI, Gemini, and Ollama).
+- **Chrome** or **Brave** (or any Chromium browser that supports unpacked MV3 extensions) — for the extension. Browser-specific, not OS-specific: runs the same on **macOS, Windows, and Linux**.
+- **Node.js 18+** and **Python with `yt-dlp`** — only if you want the optional localhost server.

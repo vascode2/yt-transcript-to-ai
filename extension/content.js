@@ -90,6 +90,12 @@ async function copyToClipboard(text) {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
+      // writeText commonly rejects with NotAllowedError when the document is
+      // not focused or the user-activation token has expired. Re-focus and
+      // try the synchronous execCommand fallback (which only needs an active
+      // selection, not a user gesture).
+      try { window.focus(); } catch (_) {}
+      try { document.body && document.body.focus({ preventScroll: true }); } catch (_) {}
       if (copyViaTextarea(text)) return true;
       await new Promise((r) => setTimeout(r, 300));
     }
@@ -120,6 +126,35 @@ async function fetchTranscriptFromPage(expectedVideoId) {
 
 const TRANSCRIPT_MAX_RETRIES = 3;
 const TRANSCRIPT_RETRY_DELAY_MS = 4000;
+
+let prefetchInFlight = null;
+
+/**
+ * Fire-and-forget transcript prefetch. Populates transcriptCache as soon as
+ * the player has captions, so the next Copy click can write to the clipboard
+ * synchronously within the 5-second user-activation window.
+ */
+function prefetchTranscript() {
+  try {
+    reconcileVideoIdentity();
+    const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+    if (!vid) return;
+    if (transcriptCache && transcriptCache.vid === vid) return;
+    if (prefetchInFlight && prefetchInFlight.vid === vid) return;
+    const p = (async () => {
+      try {
+        await getTranscriptBundle();
+      } catch (_) {
+        // Silent — the user will see real errors when they click Copy.
+      } finally {
+        if (prefetchInFlight && prefetchInFlight.vid === vid) {
+          prefetchInFlight = null;
+        }
+      }
+    })();
+    prefetchInFlight = { vid, promise: p };
+  } catch (_) { /* never throw from prefetch */ }
+}
 
 async function getTranscriptBundle() {
   reconcileVideoIdentity();
@@ -209,6 +244,12 @@ function mountUI() {
       return;
     }
   }
+
+  // Kick off a background prefetch as soon as the toolbar is mounted.
+  // This populates transcriptCache so that the user's Copy click can call
+  // navigator.clipboard.writeText() synchronously within the 5s
+  // user-activation window (otherwise Chrome rejects with NotAllowedError).
+  prefetchTranscript();
 
   function setBusy(buttons, on) {
     const list = Array.isArray(buttons) ? buttons : [buttons];
@@ -376,6 +417,9 @@ function mountUI() {
 document.addEventListener(CAPTION_EVENT, (e) => {
   if (!e.detail) return;
   captionMeta = e.detail;
+  // Player just published a caption-tracks list — kick off background fetch
+  // so the next Copy click can complete inside the user-activation window.
+  prefetchTranscript();
 });
 
 function scheduleMount() {
@@ -463,8 +507,12 @@ injectPageHook();
 document.addEventListener("yt-navigate-finish", () => {
   captionMeta = null;
   transcriptCache = null;
+  prefetchInFlight = null;
   scheduleMount();
   scheduleNativeTranscriptFontSize();
+  // Try a prefetch shortly after navigation; the player may not have caption
+  // metadata yet, in which case the CAPTION_EVENT listener above will retry.
+  setTimeout(prefetchTranscript, 1500);
 });
 
 function ensureToolbarAfterLayoutShift() {
