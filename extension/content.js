@@ -183,31 +183,22 @@ async function tryLocalServerFallback(status, copyBtn) {
 
   let resp;
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 30000);
-    resp = await fetch("http://localhost:3000/api/transcript", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-      signal: ctrl.signal,
+    const result = await chrome.runtime.sendMessage({
+      type: "YTS_LOCAL_TRANSCRIPT",
+      url,
     });
-    clearTimeout(t);
+    if (!result?.ok) {
+      // Server unreachable, returned error, or extension was reloaded.
+      status.textContent = prevStatus;
+      return false;
+    }
+    resp = { ok: true, data: result.data };
   } catch (_) {
-    // Server not running / not reachable. Restore prior status.
     status.textContent = prevStatus;
     return false;
   }
 
-  if (!resp.ok) {
-    status.textContent = prevStatus;
-    return false;
-  }
-
-  let data;
-  try { data = await resp.json(); } catch (_) {
-    status.textContent = prevStatus;
-    return false;
-  }
+  const data = resp.data;
   if (!data?.text) {
     status.textContent = prevStatus;
     return false;
