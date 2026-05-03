@@ -37,13 +37,7 @@ Opening YouTube's own transcript wakes up the data the extension reads. If it st
 
 ### Brave + long videos
 
-Brave's privacy hardening sometimes blocks YouTube's transcript API on long (1h+) videos — even YouTube's own transcript panel hangs forever in that case. The extension automatically falls back to a **localhost yt-dlp server** if you have one running:
-
-```powershell
-node server.js
-```
-
-Leave it running in a terminal. When the in-browser path fails, the extension calls `http://localhost:3000/api/transcript`, fetches the captions via `yt-dlp` (which doesn't go through the browser at all), and you'll see *"Copied (English, via local server)."* If the server isn't running, you get the normal error message — no harm done.
+Brave's privacy hardening sometimes blocks YouTube's transcript API on long (1h+) videos — even YouTube's own transcript panel hangs forever in that case. If this happens, **disable Brave Shields for `youtube.com`** (lion icon in the address bar → toggle Shields off for this site), reload the page, and try again.
 
 ---
 

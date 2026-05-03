@@ -280,46 +280,6 @@ function openAiTabAndFill(service, promptText, sendResponse, openInBackground) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "YTS_LOCAL_TRANSCRIPT") {
-    // Route localhost yt-dlp call through the background worker so it's not
-    // subject to page-context CORS quirks (Brave + cross-origin to localhost
-    // can be flaky from a content script).
-    (async () => {
-      try {
-        const url = String(message.url || "");
-        if (!url) {
-          sendResponse({ ok: false, error: "missing url" });
-          return;
-        }
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 30000);
-        let resp;
-        try {
-          resp = await fetch("http://localhost:3000/api/transcript", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-            signal: ctrl.signal,
-          });
-        } finally {
-          clearTimeout(t);
-        }
-        if (!resp.ok) {
-          sendResponse({ ok: false, error: `server ${resp.status}` });
-          return;
-        }
-        const data = await resp.json();
-        sendResponse({ ok: true, data });
-      } catch (e) {
-        sendResponse({ ok: false, error: String(e?.message || e) });
-      }
-    })();
-    return true; // async sendResponse
-  }
-  return undefined;
-});
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "YTS_FETCH_TRANSCRIPT") {
     const tabId = sender.tab?.id;
     const langPrefs = Array.isArray(message.langPrefs) && message.langPrefs.length
