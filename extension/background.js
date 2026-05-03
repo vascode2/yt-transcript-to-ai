@@ -338,9 +338,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         args: [langPrefs, message.expectedVideoId || "", message.aggressive !== false],
         func: async (prefs, expectedVideoId, aggressive) => {
           function getPlayerResponse() {
+            // Prefer the LIVE player response. YouTube refreshes caption
+            // baseUrls with a Proof-of-Origin Token (pot=) shortly after the
+            // player initializes; the cached ytInitialPlayerResponse holds
+            // the stale pre-pot baseUrl which YouTube now rejects (HTTP 400).
             try {
-              const a = window.ytInitialPlayerResponse;
-              if (a && (a.videoDetails || a.captions)) return a;
+              const el = document.querySelector("#movie_player");
+              if (el && typeof el.getPlayerResponse === "function") {
+                const o = el.getPlayerResponse();
+                if (o && (o.videoDetails || o.captions)) return o;
+              }
             } catch (_) {}
             try {
               const args = window.ytplayer?.config?.args;
@@ -351,13 +358,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             } catch (_) {}
             try {
-              const el = document.querySelector("#movie_player");
-              if (el && typeof el.getPlayerResponse === "function") {
-                const o = el.getPlayerResponse();
-                if (o && (o.videoDetails || o.captions)) return o;
-              }
+              const a = window.ytInitialPlayerResponse;
+              if (a && (a.videoDetails || a.captions)) return a;
             } catch (_) {}
             return null;
+          }
+
+          // True once a caption baseUrl carries a pot= or potc= param —
+          // the marker that YouTube has accepted the player's
+          // Proof-of-Origin Token and the URL will return 200 instead of 400.
+          function trackHasPotToken(track) {
+            const u = String(track?.baseUrl || "");
+            return /[?&]potc?=/.test(u);
           }
 
           function normalizeUrl(raw) {
@@ -1168,19 +1180,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           let pr = null;
+          // Wait up to ~6.5s for (a) the live player response to expose
+          // captionTracks AND (b) at least one track baseUrl to carry the
+          // pot=/potc= Proof-of-Origin marker. Without pot, the timedtext
+          // server returns HTTP 400 on every fetch.
           const syncDeadline = Date.now() + 6500;
+          let sawTracks = false;
           while (Date.now() < syncDeadline) {
             pr = getPlayerResponse();
             const loopTracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
             const loopPv = pr?.videoDetails?.videoId || "";
-            if (Array.isArray(loopTracks) && loopTracks.length > 0 && loopPv) {
-              break;
-            }
             if (Array.isArray(loopTracks) && loopTracks.length > 0) {
-              break;
+              sawTracks = true;
+              const anyPotted = loopTracks.some(trackHasPotToken);
+              if (anyPotted && loopPv) break;
+              // Tracks present but no pot yet — keep polling so we don't
+              // race the player and burn our retry budget on guaranteed-400s.
             }
-            await new Promise((r) => setTimeout(r, 300));
+            await new Promise((r) => setTimeout(r, 250));
           }
+          // Final read in case the loop exited on the deadline.
+          pr = getPlayerResponse() || pr;
 
           const pv = pr?.videoDetails?.videoId || "";
           const effectiveVid = pv || pageVid;
@@ -1226,6 +1246,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let got = await tryTimedtextForTracks(true);
           if (!got) {
             got = await tryTimedtextForTracks(false);
+          }
+          if (!got) {
+            // Tier 1 came up empty — likely the baseUrls 400'd because the
+            // pot token wasn't ready. Re-read the live player response and
+            // retry with whatever (potentially fresh) baseUrls it now has.
+            const fresh = getPlayerResponse();
+            const freshTracks = fresh?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+            if (Array.isArray(freshTracks) && freshTracks.length) {
+              const freshOrdered = orderTracks(freshTracks, prefs);
+              const same =
+                freshOrdered.length === ordered.length &&
+                freshOrdered.every((t, i) => t.baseUrl === ordered[i].baseUrl);
+              if (!same) {
+                for (const track of freshOrdered) {
+                  if (!track.baseUrl) continue;
+                  const urls = buildUrlAttempts(track.baseUrl);
+                  const res = await tryTimedtextUrls(urls);
+                  if (res.ok) {
+                    got = {
+                      ok: true,
+                      videoId: effectiveVid || pageVid,
+                      text: res.text,
+                      languageCode: track.languageCode || "",
+                      kind: track.kind || "",
+                      source: `${res.source}_refreshed`,
+                    };
+                    break;
+                  }
+                }
+              }
+            }
           }
           if (!got) {
             got = await tryInnerTubeTranscript(ordered, effectiveVid, pageVid);
