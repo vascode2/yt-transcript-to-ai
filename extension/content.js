@@ -142,43 +142,52 @@ function prefetchTranscript() {
     if (!vid) return;
     if (transcriptCache && transcriptCache.vid === vid) return;
     if (prefetchInFlight && prefetchInFlight.vid === vid) return;
-    const p = (async () => {
+
+    // Race the in-browser tiers and the localhost server in PARALLEL.
+    // Whichever finishes first wins and populates the cache. In Brave with
+    // Shields up the in-browser tiers take ~7s to fail, while localhost
+    // typically returns in 1-3s — so racing makes Copy ready ~3-5x faster
+    // than running them sequentially.
+    const url = `https://www.youtube.com/watch?v=${vid}`;
+    const title0 = videoTitleGuess();
+    let won = false;
+
+    const win = (result, formatted) => {
+      if (won) return;
+      won = true;
+      transcriptCache = { vid, result, formatted };
+    };
+
+    const inBrowser = (async () => {
       try {
-        // Quiet prefetch: HTTP-only tiers (timedtext + InnerTube). Do NOT
-        // open YouTube's transcript panel — that’s reserved for the user’s
-        // explicit Copy click.
         const result = await fetchTranscriptFromPage(vid, { aggressive: false });
-        if (result?.text) {
-          const title = videoTitleGuess();
-          const formatted = formatCopyBlock(title, result.videoId || vid, result.text);
-          transcriptCache = { vid, result, formatted };
-          return;
+        if (result?.text && !won) {
+          const formatted = formatCopyBlock(videoTitleGuess() || title0, result.videoId || vid, result.text);
+          win(result, formatted);
         }
-      } catch (_) {
-        // Fall through to localhost prefetch.
-      }
-      // In-browser tiers came up empty (common in Brave with Shields). Try
-      // the localhost server silently so a later Copy click is instant.
+      } catch (_) { /* silent */ }
+    })();
+
+    const localhost = (async () => {
       try {
-        const url = `https://www.youtube.com/watch?v=${vid}`;
         const local = await chrome.runtime.sendMessage({
           type: "YTS_LOCAL_TRANSCRIPT",
           url,
         });
-        if (local?.ok && local?.data?.text) {
+        if (local?.ok && local?.data?.text && !won) {
           const data = local.data;
-          const title = data.title || videoTitleGuess();
-          const formatted = formatCopyBlock(title, data.videoId || vid, data.text);
-          transcriptCache = { vid, result: data, formatted };
+          const formatted = formatCopyBlock(data.title || videoTitleGuess() || title0, data.videoId || vid, data.text);
+          win(data, formatted);
         }
-      } catch (_) {
-        // Server not running — silent.
-      } finally {
-        if (prefetchInFlight && prefetchInFlight.vid === vid) {
-          prefetchInFlight = null;
-        }
-      }
+      } catch (_) { /* server not running — silent */ }
     })();
+
+    const p = Promise.allSettled([inBrowser, localhost]).finally(() => {
+      if (prefetchInFlight && prefetchInFlight.vid === vid) {
+        prefetchInFlight = null;
+      }
+    });
+
     prefetchInFlight = { vid, promise: p };
   } catch (_) { /* never throw from prefetch */ }
 }
