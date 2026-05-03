@@ -142,27 +142,109 @@ function prefetchTranscript() {
     if (!vid) return;
     if (transcriptCache && transcriptCache.vid === vid) return;
     if (prefetchInFlight && prefetchInFlight.vid === vid) return;
-    const p = (async () => {
+
+    // Race the in-browser tiers and the localhost server in PARALLEL.
+    // Whichever finishes first wins and populates the cache. In Brave with
+    // Shields up the in-browser tiers take ~7s to fail, while localhost
+    // typically returns in 1-3s — so racing makes Copy ready ~3-5x faster
+    // than running them sequentially.
+    const url = `https://www.youtube.com/watch?v=${vid}`;
+    const title0 = videoTitleGuess();
+    let won = false;
+
+    const win = (result, formatted) => {
+      if (won) return;
+      won = true;
+      transcriptCache = { vid, result, formatted };
+    };
+
+    const inBrowser = (async () => {
       try {
-        // Quiet prefetch: HTTP-only tiers (timedtext + InnerTube). Do NOT
-        // open YouTube's transcript panel — that's reserved for the user's
-        // explicit Copy click.
         const result = await fetchTranscriptFromPage(vid, { aggressive: false });
-        if (result?.text) {
-          const title = videoTitleGuess();
-          const formatted = formatCopyBlock(title, result.videoId || vid, result.text);
-          transcriptCache = { vid, result, formatted };
+        if (result?.text && !won) {
+          const formatted = formatCopyBlock(videoTitleGuess() || title0, result.videoId || vid, result.text);
+          win(result, formatted);
         }
-      } catch (_) {
-        // Silent — the user will see real errors when they click Copy.
-      } finally {
-        if (prefetchInFlight && prefetchInFlight.vid === vid) {
-          prefetchInFlight = null;
-        }
-      }
+      } catch (_) { /* silent */ }
     })();
+
+    const localhost = (async () => {
+      try {
+        const local = await chrome.runtime.sendMessage({
+          type: "YTS_LOCAL_TRANSCRIPT",
+          url,
+        });
+        if (local?.ok && local?.data?.text && !won) {
+          const data = local.data;
+          const formatted = formatCopyBlock(data.title || videoTitleGuess() || title0, data.videoId || vid, data.text);
+          win(data, formatted);
+        }
+      } catch (_) { /* server not running — silent */ }
+    })();
+
+    const p = Promise.allSettled([inBrowser, localhost]).finally(() => {
+      if (prefetchInFlight && prefetchInFlight.vid === vid) {
+        prefetchInFlight = null;
+      }
+    });
+
     prefetchInFlight = { vid, promise: p };
   } catch (_) { /* never throw from prefetch */ }
+}
+
+/**
+ * Last-resort fallback: ask the localhost server (yt-dlp running outside
+ * the browser) for the transcript. Bypasses Brave Shields / fingerprint
+ * protection / network-layer interference. Silent if the server isn't
+ * running (returns false). On success: copies, sets status, returns true.
+ */
+async function tryLocalServerFallback(status, copyBtn) {
+  reconcileVideoIdentity();
+  const vid = videoIdFromUrl() || captionMeta?.videoId || "";
+  if (!vid) return false;
+  const url = `https://www.youtube.com/watch?v=${vid}`;
+
+  const prevStatus = status.textContent;
+  status.classList.remove("yts-ext-err", "yts-ext-status--long");
+  status.textContent = "Trying localhost yt-dlp server…";
+
+  let resp;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "YTS_LOCAL_TRANSCRIPT",
+      url,
+    });
+    if (!result?.ok) {
+      // Server unreachable, returned error, or extension was reloaded.
+      status.textContent = prevStatus;
+      return false;
+    }
+    resp = { ok: true, data: result.data };
+  } catch (_) {
+    status.textContent = prevStatus;
+    return false;
+  }
+
+  const data = resp.data;
+  if (!data?.text) {
+    status.textContent = prevStatus;
+    return false;
+  }
+
+  const title = data.title || videoTitleGuess();
+  const formatted = formatCopyBlock(title, data.videoId || vid, data.text);
+  transcriptCache = { vid, result: data, formatted };
+
+  const ok = await copyToClipboard(formatted);
+  if (!ok) {
+    status.textContent = "Transcript ready (via local server) — click Copy again to copy to clipboard.";
+    return true;
+  }
+  const langCode = data.languageCode || "";
+  const langNames = { en: "English", ko: "Korean", ja: "Japanese", zh: "Chinese", es: "Spanish", fr: "French", de: "German", pt: "Portuguese" };
+  const langLabel = langNames[langCode] || langNames[langCode.split("-")[0]] || langCode;
+  status.textContent = `Copied${langLabel ? ` (${langLabel}, via local server)` : " (via local server)"}.`;
+  return true;
 }
 
 async function getTranscriptBundle() {
@@ -281,8 +363,8 @@ function mountUI() {
       if (!vid) throw new Error("Open a video with ?v= in the URL.");
       if (transcriptCache && transcriptCache.vid === vid) return transcriptCache;
 
-      // If a prefetch is already in flight for this video, wait for it.
-      // The cache is
+      // If a prefetch (in-browser tiers + silent localhost fallback) is
+      // already in flight for this video, wait for it. The cache is
       // populated as part of that promise. Otherwise we'd race it and
       // duplicate the same fetch the user is already paying for.
       if (prefetchInFlight && prefetchInFlight.vid === vid) {
@@ -339,9 +421,17 @@ function mountUI() {
       const autoLabel = result.kind === "asr" ? ", auto-generated" : "";
       status.textContent = `Copied${langLabel ? ` (${langLabel}${autoLabel})` : ""}.`;
     } catch (e) {
+      // In-browser tiers failed (common in Brave on long videos). Try the
+      // localhost server (yt-dlp running outside the browser) before giving
+      // up. Silent if the server isn't running.
+      const localOk = await tryLocalServerFallback(status, copyBtn);
+      if (localOk) return;
+
       status.classList.add("yts-ext-err");
+      const msg = e.message || "Copy failed.";
+      const augmented = msg + "\nTip: run `node server.js` locally to bypass browser blocks.";
       status.classList.add("yts-ext-status--long");
-      status.textContent = e.message || "Copy failed.";
+      status.textContent = augmented;
     } finally {
       setBusy([copyBtn], false);
     }
