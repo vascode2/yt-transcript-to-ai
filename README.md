@@ -45,6 +45,32 @@ node server.js
 
 Leave it running in a terminal. When the in-browser path fails, the extension calls `http://localhost:3000/api/transcript`, fetches the captions via `yt-dlp` (which doesn't go through the browser at all), and you'll see *"Copied (English, via local server)."* If the server isn't running, you get the normal error message — no harm done.
 
+#### Auto-start the server in the background (Windows)
+
+Don't want to keep a terminal open? Run the installer once:
+
+```powershell
+.\scripts\install-autostart.ps1
+```
+
+This registers a Windows Scheduled Task (`YouTubeTranscriptServer`) that:
+
+- Starts `node server.js` automatically every time you log in.
+- Runs **completely hidden** — no terminal, no taskbar icon, no flash on boot. (Uses a small VBS launcher because `cmd.exe` always shows a window briefly otherwise.)
+- Logs output to `%LOCALAPPDATA%\YouTubeTranscriptServer\server.log`.
+
+Useful commands:
+
+```powershell
+.\scripts\install-autostart.ps1 -Status      # check it's running, see PID + HTTP probe
+.\scripts\install-autostart.ps1 -Uninstall   # remove autostart entirely
+Stop-ScheduledTask  -TaskName 'YouTubeTranscriptServer'    # stop now
+Start-ScheduledTask -TaskName 'YouTubeTranscriptServer'    # start now
+Get-Content $env:LOCALAPPDATA\YouTubeTranscriptServer\server.log -Tail 20
+```
+
+After reboot the server is up within a second or two of reaching your desktop — no manual action needed.
+
 ---
 
 ## Requirements
