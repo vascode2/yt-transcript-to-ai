@@ -244,10 +244,9 @@ function Explainer() {
             {[
               ['01', 'mount', 'content.js', 'On every watch page, inject a sticky toolbar at the top of the right column (#secondary-inner) above "In this video".'],
               ['02', 'prefetch', 'transcript cache', 'As soon as the player publishes caption tracks, fetch the transcript in the background so Copy is instant.'],
-              ['03', 'fetch tiers', 'timedtext · innertube · panel', 'Three in-browser fallback paths: timedtext URL → InnerTube get_transcript → scrape the native transcript side-panel.'],
-              ['04', 'local fallback', 'localhost:3000 · yt-dlp', 'Optional. If all three browser tiers fail (typical on Brave + 1h+ videos), the background worker calls a local node server that runs bundled yt-dlp. Same machine, no cloud.'],
-              ['05', 'copy', 'clipboard.writeText', 'Click writes pre-staged text inside the user-activation window. Fallback: refocus + execCommand("copy").'],
-              ['06', 'handoff', 'chrome.scripting', 'AI buttons open chatgpt.com or gemini.google.com, paste the prompt into the composer, and try to send it.'],
+              ['03', 'fetch', 'browser tiers → localhost', 'Try in-browser first: timedtext → InnerTube → DOM panel. If all three fail (Brave + long videos), fall back to optional localhost:3000 yt-dlp server. Never the cloud.'],
+              ['04', 'copy', 'clipboard.writeText', 'Click writes pre-staged text inside the user-activation window. Fallback: refocus + execCommand("copy").'],
+              ['05', 'handoff', 'chrome.scripting', 'AI buttons open chatgpt.com or gemini.google.com, paste the prompt into the composer, and try to send it.'],
             ].map(([n, name, tag, body]) => (
               <div key={n} style={s.stage}>
                 <div style={s.stageHead}>
