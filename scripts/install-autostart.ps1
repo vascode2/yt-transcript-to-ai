@@ -93,15 +93,23 @@ Write-Host "Log file   : $logFile"
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
-# Wrapper script: redirects stdout/stderr to a log file and runs node hidden.
-# We use a tiny .cmd wrapper because Scheduled Tasks have issues piping
-# stdout from node when launched directly with -WindowStyle Hidden.
-$wrapper = Join-Path $logDir 'run-server.cmd'
+# Wrapper script: redirects stdout/stderr to a log file and runs node.
+$wrapperCmd = Join-Path $logDir 'run-server.cmd'
 @"
 @echo off
 cd /d "$repoRoot"
 "$nodeExe" "$serverJs" >> "$logFile" 2>&1
-"@ | Set-Content -Path $wrapper -Encoding ASCII
+"@ | Set-Content -Path $wrapperCmd -Encoding ASCII
+
+# VBS launcher — the only reliable way to run a console process on Windows
+# with NO visible window (not even a flash). cmd.exe always shows briefly,
+# even with -WindowStyle Hidden, because the scheduler creates the
+# console before our flag takes effect.
+$wrapperVbs = Join-Path $logDir 'run-server.vbs'
+@"
+Set s = CreateObject("WScript.Shell")
+s.Run """$wrapperCmd""", 0, False
+"@ | Set-Content -Path $wrapperVbs -Encoding ASCII
 
 # If task already exists, remove it first so we can re-install cleanly.
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
@@ -109,8 +117,8 @@ if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
   Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
 }
 
-# Action: run the wrapper via cmd /c with no window.
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$wrapper`""
+# Action: run the VBS launcher (it spawns cmd hidden and exits immediately).
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$wrapperVbs`""
 
 # Trigger: at user logon.
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
