@@ -152,9 +152,27 @@ function prefetchTranscript() {
           const title = videoTitleGuess();
           const formatted = formatCopyBlock(title, result.videoId || vid, result.text);
           transcriptCache = { vid, result, formatted };
+          return;
         }
       } catch (_) {
-        // Silent — the user will see real errors when they click Copy.
+        // Fall through to localhost prefetch.
+      }
+      // In-browser tiers came up empty (common in Brave with Shields). Try
+      // the localhost server silently so a later Copy click is instant.
+      try {
+        const url = `https://www.youtube.com/watch?v=${vid}`;
+        const local = await chrome.runtime.sendMessage({
+          type: "YTS_LOCAL_TRANSCRIPT",
+          url,
+        });
+        if (local?.ok && local?.data?.text) {
+          const data = local.data;
+          const title = data.title || videoTitleGuess();
+          const formatted = formatCopyBlock(title, data.videoId || vid, data.text);
+          transcriptCache = { vid, result: data, formatted };
+        }
+      } catch (_) {
+        // Server not running — silent.
       } finally {
         if (prefetchInFlight && prefetchInFlight.vid === vid) {
           prefetchInFlight = null;
@@ -335,6 +353,17 @@ function mountUI() {
       const vid = videoIdFromUrl() || captionMeta?.videoId || "";
       if (!vid) throw new Error("Open a video with ?v= in the URL.");
       if (transcriptCache && transcriptCache.vid === vid) return transcriptCache;
+
+      // If a prefetch (in-browser tiers + silent localhost fallback) is
+      // already in flight for this video, wait for it. The cache is
+      // populated as part of that promise. Otherwise we'd race it and
+      // duplicate the same fetch the user is already paying for.
+      if (prefetchInFlight && prefetchInFlight.vid === vid) {
+        try {
+          await prefetchInFlight.promise;
+        } catch (_) { /* fall through to manual attempt */ }
+        if (transcriptCache && transcriptCache.vid === vid) return transcriptCache;
+      }
 
       let lastErr = null;
       for (let attempt = 0; attempt < TRANSCRIPT_MAX_RETRIES; attempt++) {

@@ -231,7 +231,13 @@ test("copy-flake: single attempt", async () => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await dismissConsentIfAny(page);
   await page.waitForSelector("#movie_player", { timeout: 60_000 }).catch(() => {});
-  await page.waitForTimeout(5000);
+  // Pre-click wait. Default 5s simulates a fast click. In real usage, users
+  // typically take 10–15s to read the page before clicking, by which time
+  // the extension's background prefetch has populated the cache and the
+  // click can write to the clipboard synchronously. Override via
+  // COPY_FLAKE_PRECLICK_WAIT_MS to test the warm-cache path.
+  const preClickWait = parseInt(process.env.COPY_FLAKE_PRECLICK_WAIT_MS || "5000", 10);
+  await page.waitForTimeout(preClickWait);
 
   const probeBefore = await probePage(page);
   safeWrite(path.join(DIAG_ROOT, "probe-before.json"), JSON.stringify(probeBefore, null, 2));

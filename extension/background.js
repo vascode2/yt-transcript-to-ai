@@ -1182,22 +1182,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let pr = null;
           // Wait up to ~6.5s for (a) the live player response to expose
           // captionTracks AND (b) at least one track baseUrl to carry the
-          // pot=/potc= Proof-of-Origin marker. Without pot, the timedtext
-          // server returns HTTP 400 on every fetch.
+          // pot=/potc= Proof-of-Origin marker. The token typically lands
+          // 2–5s after navigation. If it never arrives (Brave Shields
+          // blocks the script that fetches it), we skip tier 1 entirely
+          // below — but waiting at least once gives the happy path a
+          // chance.
           const syncDeadline = Date.now() + 6500;
           let sawTracks = false;
+          let sawPot = false;
           while (Date.now() < syncDeadline) {
             pr = getPlayerResponse();
             const loopTracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
             const loopPv = pr?.videoDetails?.videoId || "";
             if (Array.isArray(loopTracks) && loopTracks.length > 0) {
               sawTracks = true;
-              const anyPotted = loopTracks.some(trackHasPotToken);
-              if (anyPotted && loopPv) break;
-              // Tracks present but no pot yet — keep polling so we don't
-              // race the player and burn our retry budget on guaranteed-400s.
+              if (loopTracks.some(trackHasPotToken)) {
+                sawPot = true;
+                if (loopPv) break;
+              }
             }
-            await new Promise((r) => setTimeout(r, 250));
+            await new Promise((r) => setTimeout(r, 200));
           }
           // Final read in case the loop exited on the deadline.
           pr = getPlayerResponse() || pr;
@@ -1218,6 +1222,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           const ordered = orderTracks(tracks, prefs);
+          const anyPottedNow = ordered.some(trackHasPotToken);
 
           function tryTimedtextForTracks(filterByVid) {
             return (async () => {
@@ -1243,36 +1248,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             })();
           }
 
-          let got = await tryTimedtextForTracks(true);
-          if (!got) {
-            got = await tryTimedtextForTracks(false);
-          }
-          if (!got) {
-            // Tier 1 came up empty — likely the baseUrls 400'd because the
-            // pot token wasn't ready. Re-read the live player response and
-            // retry with whatever (potentially fresh) baseUrls it now has.
-            const fresh = getPlayerResponse();
-            const freshTracks = fresh?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-            if (Array.isArray(freshTracks) && freshTracks.length) {
-              const freshOrdered = orderTracks(freshTracks, prefs);
-              const same =
-                freshOrdered.length === ordered.length &&
-                freshOrdered.every((t, i) => t.baseUrl === ordered[i].baseUrl);
-              if (!same) {
-                for (const track of freshOrdered) {
-                  if (!track.baseUrl) continue;
-                  const urls = buildUrlAttempts(track.baseUrl);
-                  const res = await tryTimedtextUrls(urls);
-                  if (res.ok) {
-                    got = {
-                      ok: true,
-                      videoId: effectiveVid || pageVid,
-                      text: res.text,
-                      languageCode: track.languageCode || "",
-                      kind: track.kind || "",
-                      source: `${res.source}_refreshed`,
-                    };
-                    break;
+          // If pot=/potc= is missing from every baseUrl, the timedtext
+          // server will reject all of them with HTTP 400 (~14s wasted per
+          // track). Skip tier 1 entirely and go straight to InnerTube,
+          // which doesn't require pot in the URL.
+          let got = null;
+          if (anyPottedNow) {
+            got = await tryTimedtextForTracks(true);
+            if (!got) {
+              got = await tryTimedtextForTracks(false);
+            }
+            if (!got) {
+              // Tier 1 came up empty — re-read the live player response
+              // in case fresh (potentially differently-potted) baseUrls
+              // have appeared, and retry once.
+              const fresh = getPlayerResponse();
+              const freshTracks = fresh?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+              if (Array.isArray(freshTracks) && freshTracks.length) {
+                const freshOrdered = orderTracks(freshTracks, prefs);
+                const same =
+                  freshOrdered.length === ordered.length &&
+                  freshOrdered.every((t, i) => t.baseUrl === ordered[i].baseUrl);
+                if (!same) {
+                  for (const track of freshOrdered) {
+                    if (!track.baseUrl) continue;
+                    const urls = buildUrlAttempts(track.baseUrl);
+                    const res = await tryTimedtextUrls(urls);
+                    if (res.ok) {
+                      got = {
+                        ok: true,
+                        videoId: effectiveVid || pageVid,
+                        text: res.text,
+                        languageCode: track.languageCode || "",
+                        kind: track.kind || "",
+                        source: `${res.source}_refreshed`,
+                      };
+                      break;
+                    }
                   }
                 }
               }
