@@ -73,9 +73,15 @@ function Explainer() {
     subgraph ext["extension/content.js (in your tab)"]
       direction LR
       M[mount toolbar]
-      F{fetch transcript<br/>3 tiers}
+      F{fetch transcript<br/>in-browser · 3 tiers}
       C1[Copy transcript<br/>button]
       C2[ChatGPT / Gemini<br/>buttons]
+    end
+    subgraph local["optional · localhost:3000 (your machine)"]
+      L[node server.js<br/>+ yt-dlp]
+    end
+    subgraph cloud["the cloud · NOT used"]
+      X[no backend<br/>no upload<br/>no analytics]
     end
     subgraph clip["clipboard / AI tab"]
       O1[(clipboard text)]
@@ -83,6 +89,8 @@ function Explainer() {
       O3[(gemini.google.com<br/>composer)]
     end
     P --> M --> F
+    F -. browser blocked .-> L
+    L --> C1
     F --> C1 --> O1
     F --> C2
     C2 --> O2
@@ -90,6 +98,8 @@ function Explainer() {
     style P fill:#FFA657,stroke:#FFA657,color:#0E1116
     style M fill:#161B22,stroke:#3FB950,color:#E6EDF3
     style F fill:#161B22,stroke:#3FB950,color:#E6EDF3
+    style L fill:#161B22,stroke:#FFD966,color:#E6EDF3
+    style X fill:#0E1116,stroke:#6E7681,color:#6E7681,stroke-dasharray: 4 4
     style C1 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
     style C2 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
     style O1 fill:#1F2733,stroke:#58A6FF,color:#E6EDF3
@@ -198,11 +208,20 @@ function Explainer() {
             <div style={s.sectionTag}>02 / architecture</div>
             <h2 style={s.h2}>What happens inside the YouTube tab</h2>
             <p style={s.dek}>
-              All work happens in your browser — no server, no upload. The content script reads the
-              player's caption tracks, prefetches the text in the background, and stages it on the
+              By default, everything happens in your browser — <b>no cloud, no upload, no analytics</b>. The content
+              script reads the player's caption tracks, prefetches the text in the background, and stages it on the
               clipboard the moment you click. The AI buttons piggy-back on <code style={s.code}>chrome.scripting</code>
               (a permission that lets the extension paste into a tab on another site) to drop the
-              transcript straight into the ChatGPT or Gemini composer.
+              transcript into the ChatGPT or Gemini composer.
+            </p>
+            <p style={s.dek}>
+              <b>Cloud vs. local server.</b> The extension never talks to a remote backend. But Brave's
+              privacy hardening sometimes blocks YouTube's transcript API on long videos. For that case there's an
+              <b> optional fallback</b>: a tiny <code style={s.code}>node server.js</code> on <code style={s.code}>localhost:3000</code>
+              that uses bundled <code style={s.code}>yt-dlp</code> to fetch captions outside the browser sandbox. It runs entirely
+              on your machine — same privacy story, just a different process. A one-line installer
+              (<code style={s.code}>scripts/install-autostart.ps1</code>) registers it as a hidden Windows scheduled task so
+              it auto-starts at login with no terminal window.
             </p>
           </div>
 
@@ -225,9 +244,10 @@ function Explainer() {
             {[
               ['01', 'mount', 'content.js', 'On every watch page, inject a sticky toolbar at the top of the right column (#secondary-inner) above "In this video".'],
               ['02', 'prefetch', 'transcript cache', 'As soon as the player publishes caption tracks, fetch the transcript in the background so Copy is instant.'],
-              ['03', 'fetch tiers', 'timedtext · innertube · panel', 'Three fallback paths: timedtext URL → InnerTube get_transcript → scrape the native transcript side-panel.'],
-              ['04', 'copy', 'clipboard.writeText', 'Click writes pre-staged text inside the user-activation window. Fallback: refocus + execCommand("copy").'],
-              ['05', 'handoff', 'chrome.scripting', 'AI buttons open chatgpt.com or gemini.google.com, paste the prompt into the composer, and try to send it.'],
+              ['03', 'fetch tiers', 'timedtext · innertube · panel', 'Three in-browser fallback paths: timedtext URL → InnerTube get_transcript → scrape the native transcript side-panel.'],
+              ['04', 'local fallback', 'localhost:3000 · yt-dlp', 'Optional. If all three browser tiers fail (typical on Brave + 1h+ videos), the background worker calls a local node server that runs bundled yt-dlp. Same machine, no cloud.'],
+              ['05', 'copy', 'clipboard.writeText', 'Click writes pre-staged text inside the user-activation window. Fallback: refocus + execCommand("copy").'],
+              ['06', 'handoff', 'chrome.scripting', 'AI buttons open chatgpt.com or gemini.google.com, paste the prompt into the composer, and try to send it.'],
             ].map(([n, name, tag, body]) => (
               <div key={n} style={s.stage}>
                 <div style={s.stageHead}>
@@ -265,6 +285,7 @@ function Explainer() {
                   <tr><td style={s.ioKey}>host: youtube.com</td><td style={s.ioVal}>read captions, mount the toolbar</td></tr>
                   <tr><td style={s.ioKey}>host: chatgpt.com</td><td style={s.ioVal}>inject the prompt + transcript into the composer</td></tr>
                   <tr><td style={s.ioKey}>host: gemini.google.com</td><td style={s.ioVal}>inject the prompt + transcript into the composer</td></tr>
+                  <tr><td style={s.ioKey}>host: localhost:3000</td><td style={s.ioVal}>optional · talk to your local yt-dlp server when the browser path fails</td></tr>
                   <tr><td style={s.ioKey}>player JSON</td><td style={s.ioVal}>read at runtime — caption tracks + video id</td></tr>
                 </tbody>
               </table>
